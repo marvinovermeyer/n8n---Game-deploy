@@ -1,0 +1,2326 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>FORTIFY & DECAY</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color: transparent; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#0a0a0a; font-family: 'Courier New', monospace; touch-action:none; }
+  #gameCanvas { display:block; background:#1a2e1a; image-rendering: pixelated; }
+
+  #hud { position:fixed; top:0; left:0; right:0; padding:8px 10px; display:flex; justify-content:space-between; align-items:flex-start; pointer-events:none; z-index:10; font-size:12px; color:#eee; text-shadow:1px 1px 0 #000; }
+  #stats { background:rgba(0,0,0,0.55); padding:6px 10px; border:2px solid #444; border-radius:4px; line-height:1.5; }
+  #stats .res { display:flex; gap:10px; }
+  #stats span { display:inline-block; transition:transform 0.15s; }
+  #stats span.pop { transform:scale(1.35); color:#cfc; }
+  #stats.hurt { animation:hurtFlash 0.4s; }
+  @keyframes hurtFlash { 0% { border-color:#f33; box-shadow:0 0 12px rgba(255,50,50,0.8); } 100% { border-color:#444; box-shadow:none; } }
+  #phaseBox { background:rgba(0,0,0,0.55); padding:8px 12px; border:2px solid #444; border-radius:4px; text-align:right; min-width:150px; }
+  #phaseBox.night { border-color:#822; color:#fbb; }
+  #phaseBox.dusk { border-color:#a72; color:#fd8; animation:duskPulse 1s infinite; }
+  @keyframes duskPulse { 0%,100% { box-shadow:0 0 4px rgba(255,150,50,0.3); } 50% { box-shadow:0 0 14px rgba(255,150,50,0.8); } }
+  #phaseTitle { display:flex; align-items:center; justify-content:flex-end; gap:6px; font-size:13px; }
+  #phaseSubtext { font-size:11px; opacity:0.85; margin-top:2px; }
+  #phaseProgressWrap { width:100%; height:6px; background:#222; border:1px solid #555; border-radius:3px; margin-top:5px; overflow:hidden; }
+  #phaseProgressBar { height:100%; background:#fc5; width:0%; transition:width 0.2s linear; }
+  #phaseProgressBar.night { background:#77e; }
+  #skyOverlay { position:fixed; inset:0; pointer-events:none; z-index:5; transition:background 0.5s; }
+  #baseHpBarWrap { width:120px; height:8px; background:#222; border:1px solid #555; margin-top:4px; }
+  #baseHpBar { height:100%; background:#4caf50; width:100%; }
+
+  .btn-pressed { transform:scale(0.9) !important; filter:brightness(1.4); }
+
+  /* ---------- DAUMENZONEN-LAYOUT ----------
+     Alles Interaktive sitzt in der unteren Bildschirmhälfte, erreichbar ohne Umgreifen.
+     Oben (#hud) ist rein informativ, nirgends antippbar. */
+
+  #joystickZone { position:fixed; bottom:0; left:0; width:42%; height:48%; z-index:6; }
+  #joystickBase { position:absolute; width:100px; height:100px; border-radius:50%; background:rgba(255,255,255,0.08); border:2px solid rgba(255,255,255,0.3); display:none; }
+  #joystickStick { position:absolute; width:44px; height:44px; border-radius:50%; background:rgba(255,255,255,0.35); border:2px solid rgba(255,255,255,0.5); display:none; }
+  #moveLabel { position:fixed; bottom:8px; left:12px; z-index:9; color:rgba(255,255,255,0.55); font-size:10px; text-shadow:1px 1px 0 #000; pointer-events:none; }
+
+  #aimZone { position:fixed; bottom:0; right:0; width:48%; height:52%; z-index:6; }
+  #aimBase { position:absolute; width:110px; height:110px; border-radius:50%; background:rgba(255,80,40,0.06); border:2px solid rgba(255,120,60,0.35); display:none; }
+  #aimStick { position:absolute; width:46px; height:46px; border-radius:50%; background:rgba(255,120,60,0.4); border:2px solid rgba(255,150,80,0.6); display:none; }
+
+  #actionZone { position:fixed; bottom:18px; right:16px; z-index:11; display:flex; flex-direction:column; gap:8px; align-items:center; }
+  #attackBtn { width:76px; height:76px; border-radius:50%; background:rgba(180,30,30,0.75); border:3px solid #f55; color:#fff; font-size:12px; font-weight:bold; pointer-events:auto; transition:transform 0.08s, background 0.08s; }
+  #attackBtn:active, #attackBtn.btn-pressed { background:rgba(255,80,80,0.95); transform:scale(0.88); box-shadow:0 0 16px rgba(255,80,80,0.8); }
+  #attackHint { font-size:9px; color:rgba(255,255,255,0.55); text-shadow:1px 1px 0 #000; text-align:center; }
+  #ammoBox { pointer-events:auto; background:rgba(0,0,0,0.65); border:2px solid #654; border-radius:6px; padding:6px 12px; color:#fda; font-size:13px; text-align:center; min-width:80px; transition:transform 0.08s; }
+  #ammoBox.reloading { color:#f95; animation:duskPulse 0.6s infinite; }
+  #slotBar { display:flex; gap:4px; }
+  #slotBar .slot { width:28px; height:28px; border-radius:4px; background:rgba(0,0,0,0.5); border:1px dashed #555; display:flex; align-items:center; justify-content:center; font-size:14px; opacity:0.5; }
+
+  /* Baumenü: großer Hammer-FAB unten mittig — erreichbar von beiden Daumen,
+     Werkzeugauswahl klappt direkt darüber auf, nicht am anderen Bildschirmrand. */
+  #buildFab { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:12;
+    width:68px; height:68px; border-radius:50%; background:rgba(50,50,55,0.9); border:3px solid #888;
+    color:#fff; font-size:26px; display:flex; align-items:center; justify-content:center;
+    pointer-events:auto; transition:transform 0.08s, background 0.08s; }
+  #buildFab.active { background:rgba(70,150,70,0.95); border-color:#8f8; box-shadow:0 0 14px rgba(140,255,140,0.7); }
+
+  #buildToolRow { position:fixed; bottom:96px; left:50%; transform:translateX(-50%); z-index:12;
+    display:none; gap:10px; }
+  #buildToolRow.show { display:flex; }
+  #buildToolRow button { pointer-events:auto; width:64px; height:64px; border-radius:12px;
+    background:#334; border:2px solid #667; color:#fff; font-family:inherit; font-size:11px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+    transition:transform 0.08s, background 0.08s; }
+  #buildToolRow button .icon { font-size:20px; }
+  #buildToolRow button.selected { background:#563; border-color:#9a6; box-shadow:0 0 10px rgba(180,255,120,0.6); }
+  #buildToolRow { flex-wrap:wrap; justify-content:center; max-width:236px; }
+  #buildToolRow button.locked { opacity:0.45; border-style:dashed; }
+  #buildToolRow button.locked::after { content:'🔒'; position:absolute; font-size:16px; }
+  #buildToolRow button { position:relative; }
+
+  /* Prestige-Shop auf dem Todes-Screen */
+  #shopTitle { color:#fc5; font-size:14px; margin-top:16px; }
+  #shopPoints { color:#8f8; font-size:13px; margin-bottom:6px; }
+  #shopRow { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; max-width:340px; }
+  #shopRow button { pointer-events:auto; width:100px; min-height:74px; padding:6px 4px; margin-top:0;
+    background:#2a2a35; border:2px solid #557; color:#fff; font-family:inherit; font-size:10px;
+    border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    transition:transform 0.08s, background 0.08s; }
+  #shopRow button .shopIcon { font-size:18px; }
+  #shopRow button .shopCost { color:#fc5; font-weight:bold; }
+  #shopRow button:disabled { opacity:0.4; }
+  #shopRow button.owned { border-color:#5a5; background:#243024; }
+  #shopRow button.owned .shopCost { color:#8f8; }
+
+  #buildHint { position:fixed; bottom:168px; left:50%; transform:translateX(-50%); z-index:12;
+    display:none; background:rgba(0,0,0,0.8); color:#9f9; font-size:12px; padding:6px 12px;
+    border-radius:4px; border:1px solid #4a4; text-align:center; max-width:290px; }
+  #buildHint.show { display:block; }
+
+  #restartBtn { pointer-events:auto; padding:10px 14px; background:#333; border:2px solid #666; color:#fff; font-family:inherit; font-size:13px; border-radius:4px; transition:transform 0.08s, background 0.08s; }
+
+  #log { position:fixed; top:78px; left:50%; transform:translateX(-50%); color:#fff; font-size:13px; text-shadow:1px 1px 0 #000; z-index:15; pointer-events:none; display:flex; flex-direction:column; align-items:center; gap:4px; width:90%; max-width:340px; }
+  #log .msg { background:rgba(0,0,0,0.7); padding:5px 10px; border-radius:4px; border:1px solid #555; transition:opacity 0.3s; }
+  #log .msg.error { border-color:#a44; color:#faa; }
+  #log .msg.success { border-color:#4a4; color:#afa; }
+
+  #overlay { position:fixed; inset:0; background:rgba(0,0,0,0.85); display:none; align-items:center; justify-content:center; z-index:20; flex-direction:column; color:#fff; text-align:center; padding:20px; }
+  #overlay.show { display:flex; }
+  #overlay h1 { color:#f55; margin-bottom:14px; font-size:22px; }
+  #overlay p { margin:4px 0; font-size:13px; }
+  #overlay button { margin-top:16px; padding:10px 20px; background:#5a5; border:2px solid #8f8; color:#fff; font-family:inherit; font-size:14px; border-radius:4px; pointer-events:auto; }
+
+  #startOverlay { position:fixed; inset:0; background:#0a0a0a; display:flex; align-items:center; justify-content:center; z-index:30; flex-direction:column; color:#fff; text-align:center; padding:20px; }
+  #startOverlay h1 { color:#8f8; font-size:26px; margin-bottom:10px; letter-spacing:2px; }
+  #startOverlay p { font-size:12px; color:#aaa; max-width:320px; margin-bottom:6px; line-height:1.5; }
+  #startOverlay button { margin-top:20px; padding:12px 26px; background:#5a5; border:2px solid #8f8; color:#fff; font-family:inherit; font-size:15px; border-radius:4px; }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+<div id="skyOverlay"></div>
+
+<div id="hud">
+  <div id="stats">
+    <div class="res">🪵 <span id="woodVal">0</span> &nbsp; 🪨 <span id="stoneVal">0</span></div>
+    <div>❤️ Basis: <span id="baseHpText">100</span></div>
+    <div id="baseHpBarWrap"><div id="baseHpBar"></div></div>
+  </div>
+  <div id="phaseBox">
+    <div id="phaseTitle">☀️ Tag 1</div>
+    <div id="phaseSubtext">90s bis Nacht</div>
+    <div id="phaseProgressWrap"><div id="phaseProgressBar"></div></div>
+  </div>
+</div>
+
+<div id="log"></div>
+
+<div id="joystickZone">
+  <div id="joystickBase"></div>
+  <div id="joystickStick"></div>
+</div>
+<div id="moveLabel">🕹️ Ziehen zum Bewegen</div>
+
+<div id="aimZone">
+  <div id="aimBase"></div>
+  <div id="aimStick"></div>
+</div>
+
+<div id="actionZone">
+  <div id="slotBar">
+    <div class="slot" title="Werkzeug — bald verfügbar">🛠️</div>
+    <div class="slot" title="Rüstung — bald verfügbar">🛡️</div>
+  </div>
+  <div id="ammoBox">🔫 <span id="ammoVal">6/6</span></div>
+  <div id="attackHint">Tippen: Nahkampf<br>Ziehen: Zielen &amp; Schießen</div>
+  <button id="attackBtn">⚔️<br>Angriff</button>
+</div>
+
+<!-- Baumenü: großer Daumen-erreichbarer Hammer unten mittig, Werkzeuge klappen direkt darüber auf -->
+<div id="buildHint">Tippe auf ein <span style="color:#9f9">grün markiertes Feld</span> in deiner Nähe</div>
+<div id="buildToolRow">
+  <button id="wallBtn" class="selected"><span class="icon">🧱</span>Wand<br>10🪵</button>
+  <button id="doorBtn"><span class="icon">🚪</span>Tür<br>10🪵</button>
+  <button id="upgradeBtn"><span class="icon">⬆️</span>Upgr.<br>8🪨</button>
+  <button id="turretBtn"><span class="icon">🏹</span>Turm<br>25🪨</button>
+  <button id="firetrapBtn"><span class="icon">🔥</span>Falle<br>15🪵</button>
+</div>
+<button id="buildFab">🔨</button>
+
+<div id="overlay">
+  <h1>BASIS GEFALLEN</h1>
+  <p id="overlayStats"></p>
+  <p style="color:#8f8; margin-top:10px;">Prestige-Punkte erhalten: <span id="prestigeGain"></span></p>
+  <div id="shopTitle">— PRESTIGE-SHOP —</div>
+  <div id="shopPoints">Verfügbar: <span id="shopPointsVal">0</span> P</div>
+  <div id="shopRow"></div>
+  <button id="restartBtn">Neuer Run</button>
+</div>
+
+<div id="startOverlay">
+  <h1>FORTIFY & DECAY</h1>
+  <p>Baue Wände, verteidige deine Basis gegen nächtliche Zombiehorden. Sammle Holz & Stein tagsüber, überlebe die Nacht. Fällt deine Basis, startest du mit Prestige-Boni neu.</p>
+  <p style="text-align:left; margin-top:10px; line-height:1.7;">
+    🕹️ <b>Joystick unten links</b> ziehen zum Bewegen<br>
+    ⚔️ <b>Angriff-Button unten rechts</b> tippen zum Kämpfen<br>
+    🔨 <b>Hammer-Button unten mittig</b> aktiviert das Baumenü<br>
+    🟩 Im Baumodus zeigen <b>grün pulsierende Felder</b>, wo du bauen kannst<br>
+    🌳 Einfach auf Bäume/Steine <b>zulaufen</b> zum Sammeln
+  </p>
+  <p style="color:#8f8; margin-top:10px;">Prestige gesamt: <span id="prestigeTotalStart">0</span></p>
+  <p style="color:#555; font-size:10px; margin-top:14px;">build v1.1 — Content: Pfeilturm, Feuerfalle, Spucker, Prestige-Shop</p>
+  <button id="startBtn">Run starten</button>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // ---------- CONFIG ----------
+  const CFG = {
+    tile: 32,
+    gridSize: 24,           // 24x24 tiles
+    coreRadius: 2,          // core zone radius in tiles from center
+    dayDuration: 90,
+    nightDuration: 60,
+    duskWarning: 8,
+    baseWallHP: [0, 40, 90],  // index 0 unused, tier1=40hp, tier2=90hp
+    passiveDecayPerNight: 4,
+    playerSpeed: 110,
+    playerAttackDamage: 14,
+    playerAttackRange: 34,
+    playerAttackCooldown: 0.4,
+    playerMaxHP: 100,
+    baseMaxHP: 100,
+    gatherRate: 14, // per second while overlapping
+    resourceRespawnTime: 45,
+    visionRadius: 220,
+    bulletSpeed: 480, // generische Fluggeschwindigkeit für alle Feuerwaffen
+    doorOpenRadius: 45,
+    maxWeaponSlots: 3,
+    repairCostPerSec: 0.9,   // Ressource/Sekunde je reparierter Zelle (vorher 0.15 — deutlich spürbarer)
+    repairHealPerSec: 6,     // HP/Sekunde (vorher 8 — etwas entschleunigt, damit Kosten passen)
+    // Pfeilturm
+    turretCostStone: 25,
+    turretHP: 60,
+    turretRange: 150,
+    turretDamage: 8,
+    turretFireCooldown: 1.1,
+    // Feuerfalle
+    firetrapCostWood: 15,
+    firetrapDPS: 14,        // Schaden/Sekunde an Zombies auf dem Feld
+    firetrapFuel: 12,       // Sekunden Brenndauer unter Last, danach ausgebrannt
+    // Spucker (Fernkampf-Zombie, Konter gegen Turm-hinter-Mauer)
+    spitterRange: 120,
+    spitterProjectileSpeed: 170,
+  };
+
+  // ---------- WAFFEN-KATALOG (erweiterbar) ----------
+  // Jede Waffe ist ein reiner Datensatz. Neue Waffen = neuer Eintrag, kein Codeumbau nötig.
+  const WEAPON_CATALOG = {
+    pistole:    { name: 'Pistole',       icon: '🔫', damage: 12, fireCooldown: 0.28, magazineSize: 6,  reloadTime: 1.6, range: 320 },
+    schrotflinte:{ name: 'Schrotflinte', icon: '💥', damage: 9,  fireCooldown: 0.85, magazineSize: 2,  reloadTime: 2.2, range: 170, pellets: 4 },
+    mp:         { name: 'MP',            icon: '🔫', damage: 6,  fireCooldown: 0.10, magazineSize: 20, reloadTime: 2.0, range: 260 },
+  };
+
+  // ---------- LOOT-TABELLE (erweiterbar um 'armor', 'tool', ...) ----------
+  const LOOT_TABLE = [
+    { type: 'weapon',   id: 'pistole',      weight: 25 },
+    { type: 'weapon',   id: 'schrotflinte', weight: 20 },
+    { type: 'weapon',   id: 'mp',           weight: 15 },
+    { type: 'resource', id: 'wood',         amount: 35, weight: 20 },
+    { type: 'resource', id: 'stone',        amount: 25, weight: 20 },
+    // später einfach ergänzbar: { type: 'armor', id: 'lederweste', weight: 10 },
+  ];
+
+  // ---------- PRESTIGE (localStorage) ----------
+  const SAVE_KEY = 'fortifyDecaySave';
+  function loadSave() {
+    const fresh = { version: 2, prestige: 0, bonusWood: 0, bonusStone: 0, bonusBaseHP: 0, unlocks: {} };
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return fresh;
+      const s = JSON.parse(raw);
+      // Migration älterer Saves: fehlende Felder ergänzen, vorhandene Boni bleiben erhalten
+      if (!s.unlocks) s.unlocks = {};
+      if (!s.version) s.version = 2;
+      return s;
+    } catch(e) { return fresh; }
+  }
+  function saveSave(data) {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  }
+  let save = loadSave();
+  document.getElementById('prestigeTotalStart').textContent = save.prestige;
+
+  // ---------- WORLD STATE ----------
+  const world = {
+    tileSize: CFG.tile,
+    gridSize: CFG.gridSize,
+    worldSize: CFG.tile * CFG.gridSize,
+  };
+
+  let camera = { x: 0, y: 0 };
+  let shake = { intensity: 0, decay: 8 }; // Screen-Shake: intensity fällt pro Sekunde um decay
+  function addShake(amount) {
+    shake.intensity = Math.min(10, shake.intensity + amount);
+  }
+  let fogCanvas, fogCtx;
+  let lightCanvas = null, lightCtx = null;
+  let baseUnderAttackTimer = 0, baseAttackAnnounced = false;
+
+  let player, grid, resourceNodes, zombies, particles, bullets, weaponPickup, chest;
+  let wood, stone, baseHP, playerHP;
+  let dayCount, phase, phaseTimer, waveCount, zombiesKilled;
+  let dayWarningShown = false, peakZombieCount = 1;
+  let buildMode = false, selectedBuildTool = 'wall';
+  let gameRunning = false;
+  let logMessages = [];
+
+  function log(msg, kind) {
+    const el = document.createElement('div');
+    el.className = 'msg' + (kind ? ' ' + kind : '');
+    el.textContent = msg;
+    const logBox = document.getElementById('log');
+    logBox.appendChild(el);
+    while (logBox.children.length > 3) logBox.removeChild(logBox.firstChild);
+    setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 2200);
+  }
+
+  // generic press-feedback for any button: visual pulse on touch/click
+  function addPressFeedback(el) {
+    if (!el) return;
+    const flash = () => {
+      el.classList.add('btn-pressed');
+      setTimeout(() => el.classList.remove('btn-pressed'), 120);
+    };
+    el.addEventListener('touchstart', flash, {passive:true});
+    el.addEventListener('mousedown', flash);
+  }
+
+  function initGame() {
+    const cx = Math.floor(CFG.gridSize/2);
+    const cy = Math.floor(CFG.gridSize/2);
+
+    player = {
+      x: cx * CFG.tile + CFG.tile/2,
+      y: cy * CFG.tile + CFG.tile/2,
+      w: 18, h: 18,
+      hp: CFG.playerMaxHP,
+      facing: {x:0, y:1},
+      attackCooldown: 0,
+      // Inventar/Ausrüstung — Waffen aktiv, Tool/Rüstung als vorbereitete, noch inaktive Slots
+      weapons: [],            // z.B. ['pistole', 'schrotflinte'] — max. CFG.maxWeaponSlots
+      equippedWeaponIndex: -1, // -1 = keine Waffe, nur Nahkampf
+      tool: null,              // reserviert für spätere Werkzeuge (z.B. Axt = schnelleres Sammeln)
+      armor: null,             // reserviert für spätere Rüstung (z.B. Schadensreduktion)
+      ammo: 0,
+      reloading: false,
+      reloadTimer: 0,
+      fireCooldown: 0,
+    };
+
+    fogCanvas = document.createElement('canvas');
+    fogCanvas.width = CFG.tile * CFG.gridSize;
+    fogCanvas.height = CFG.tile * CFG.gridSize;
+    fogCtx = fogCanvas.getContext('2d');
+    fogCtx.fillStyle = '#000';
+    fogCtx.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
+    groundCanvas = null; // Boden-Textur beim nächsten Frame frisch generieren
+
+    grid = {}; // key "gx,gy" -> {type:'wall'|'door', tier, hp, maxHp} | {type:'core'} | {type:'floor'}
+
+    // Basis = alter, verfallener Außenposten. Kern liegt IM Gebäude, umschlossen von der Ringmauer mit Toröffnung.
+    // Größerer Grundriss (7x7) als zuvor, Wände starten stärker beschädigt aber überlebensfähig, nicht sofort einreißbar.
+    const ruinRadius = 3;
+    for (let dx = -ruinRadius; dx <= ruinRadius; dx++) {
+      for (let dy = -ruinRadius; dy <= ruinRadius; dy++) {
+        const gx = cx + dx, gy = cy + dy;
+        const isOuterRing = Math.abs(dx) === ruinRadius || Math.abs(dy) === ruinRadius;
+        const isEntrance = dx === -ruinRadius && dy >= -1 && dy <= 1; // Toröffnung Richtung Westen
+
+        if (isOuterRing && !isEntrance) {
+          grid[`${gx},${gy}`] = { type: 'wall', tier: 1, hp: 18, maxHp: CFG.baseWallHP[1], isRuin: true };
+        } else if (isEntrance) {
+          grid[`${gx},${gy}`] = { type: 'floor', isEntrance: true };
+        } else if (dx === 0 && dy === 0) {
+          grid[`${gx},${gy}`] = { type: 'core', isCenter: true };
+        } else {
+          grid[`${gx},${gy}`] = { type: 'core' };
+        }
+      }
+    }
+
+    // Waffen-Fundstück tief im Inneren der Ruine: erst nach dem Aufheben kann geschossen werden
+    weaponPickup = {
+      x: (cx + 2) * CFG.tile + CFG.tile/2,
+      y: (cy - 2) * CFG.tile + CFG.tile/2,
+      collected: false,
+    };
+
+    // Truhe irgendwo abseits der Basis — muss erst erkundet werden (Fog of War)
+    chest = {
+      x: (cx - 8) * CFG.tile + CFG.tile/2,
+      y: (cy + 7) * CFG.tile + CFG.tile/2,
+      opened: false,
+      opening: false,
+      progress: 0,
+    };
+
+    resourceNodes = [];
+    for (let i = 0; i < 45; i++) {
+      let gx, gy;
+      do {
+        gx = Math.floor(Math.random() * CFG.gridSize);
+        gy = Math.floor(Math.random() * CFG.gridSize);
+      } while (Math.abs(gx-cx) + Math.abs(gy-cy) < 5 || grid[`${gx},${gy}`]);
+      resourceNodes.push({
+        x: gx * CFG.tile + CFG.tile/2,
+        y: gy * CFG.tile + CFG.tile/2,
+        type: Math.random() < 0.55 ? 'wood' : 'stone',
+        amount: 100,
+        maxAmount: 100,
+        respawnTimer: 0,
+      });
+    }
+
+    zombies = [];
+    particles = [];
+    bullets = [];
+
+    wood = 40 + save.bonusWood;
+    stone = 25 + save.bonusStone;
+    baseHP = CFG.baseMaxHP + save.bonusBaseHP;
+    playerHP = CFG.playerMaxHP;
+
+    dayCount = 1;
+    lastWoodShown = 0; lastStoneShown = 0; lastBaseHpShown = Infinity;
+    baseUnderAttackTimer = 0; baseAttackAnnounced = false;
+    dayWarningShown = false;
+    phase = 'day';
+    phaseTimer = CFG.dayDuration;
+    waveCount = 0;
+    zombiesKilled = 0;
+
+    updateHUD();
+    log('Run gestartet. Dein alter Außenposten ist verfallen!', 'success');
+    setTimeout(() => log('🚪 Das Tor im Westen steht offen — baue eine Tür! Sie öffnet/schließt sich automatisch bei Nähe.'), 900);
+    setTimeout(() => log('⚔️ Du hast nur Nahkampf — irgendwo im Außenposten liegt eine Waffe.'), 1900);
+    setTimeout(() => log('📦 Irgendwo in der Welt liegt außerdem eine Truhe mit zufälligem Loot.'), 2900);
+  }
+
+  // ---------- INPUT: JOYSTICK ----------
+  const joystickZone = document.getElementById('joystickZone');
+  const joystickBase = document.getElementById('joystickBase');
+  const joystickStick = document.getElementById('joystickStick');
+  let joystickActive = false;
+  let joystickTouchId = null;
+  let joystickVec = { x: 0, y: 0 };
+  let joystickOrigin = { x: 0, y: 0 };
+
+  function jsStart(clientX, clientY) {
+    joystickActive = true;
+    joystickOrigin = { x: clientX, y: clientY };
+    joystickBase.style.display = 'block';
+    joystickStick.style.display = 'block';
+    joystickBase.style.left = (clientX - 50) + 'px';
+    joystickBase.style.top = (clientY - 50) + 'px';
+    joystickStick.style.left = (clientX - 22) + 'px';
+    joystickStick.style.top = (clientY - 22) + 'px';
+  }
+  function jsMove(clientX, clientY) {
+    if (!joystickActive) return;
+    let dx = clientX - joystickOrigin.x;
+    let dy = clientY - joystickOrigin.y;
+    const maxDist = 50;
+    const dist = Math.min(Math.hypot(dx, dy), maxDist);
+    const angle = Math.atan2(dy, dx);
+    const sx = Math.cos(angle) * dist;
+    const sy = Math.sin(angle) * dist;
+    joystickStick.style.left = (joystickOrigin.x + sx - 22) + 'px';
+    joystickStick.style.top = (joystickOrigin.y + sy - 22) + 'px';
+    joystickVec = { x: sx / maxDist, y: sy / maxDist };
+  }
+  function jsEnd() {
+    joystickActive = false;
+    joystickTouchId = null;
+    joystickVec = { x: 0, y: 0 };
+    joystickBase.style.display = 'none';
+    joystickStick.style.display = 'none';
+  }
+  // Touch-Identifier verfolgen: e.touches enthält ALLE Finger auf dem Bildschirm,
+  // nicht nur den auf dieser Zone — ohne Identifier-Check würde der Aim-Daumen
+  // versehentlich die Bewegung steuern (und umgekehrt).
+  joystickZone.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (joystickTouchId !== null) return; // schon ein aktiver Finger hier
+    const t = e.changedTouches[0];
+    joystickTouchId = t.identifier;
+    jsStart(t.clientX, t.clientY);
+  }, {passive:false});
+  joystickZone.addEventListener('touchmove', e => {
+    e.preventDefault();
+    const t = Array.from(e.touches).find(t => t.identifier === joystickTouchId);
+    if (t) jsMove(t.clientX, t.clientY);
+  }, {passive:false});
+  joystickZone.addEventListener('touchend', e => {
+    e.preventDefault();
+    const ended = Array.from(e.changedTouches).some(t => t.identifier === joystickTouchId);
+    if (ended) jsEnd();
+  }, {passive:false});
+  joystickZone.addEventListener('touchcancel', e => {
+    e.preventDefault();
+    const ended = Array.from(e.changedTouches).some(t => t.identifier === joystickTouchId);
+    if (ended) jsEnd();
+  }, {passive:false});
+  // mouse fallback for desktop testing
+  joystickZone.addEventListener('mousedown', e => jsStart(e.clientX, e.clientY));
+  window.addEventListener('mousemove', e => { if (joystickActive) jsMove(e.clientX, e.clientY); });
+  window.addEventListener('mouseup', () => jsEnd());
+
+  // keyboard fallback
+  const keys = {};
+  window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+  window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+  // ---------- INPUT: AIM-STICK (Schusswaffe) ----------
+  const aimZone = document.getElementById('aimZone');
+  const aimBase = document.getElementById('aimBase');
+  const aimStick = document.getElementById('aimStick');
+  const AIM_DEADZONE = 14;
+  let aimTouching = false;
+  let aimTouchId = null;
+  let aiming = false; // true once drag exceeds deadzone -> continuous fire
+  let aimVec = { x: 0, y: 0 };
+  let aimOrigin = { x: 0, y: 0 };
+  let aimTouchStartTime = 0;
+
+  function aimStart(clientX, clientY) {
+    aimTouching = true;
+    aiming = false;
+    aimTouchStartTime = performance.now();
+    aimOrigin = { x: clientX, y: clientY };
+    aimBase.style.display = 'block';
+    aimStick.style.display = 'block';
+    aimBase.style.left = (clientX - 55) + 'px';
+    aimBase.style.top = (clientY - 55) + 'px';
+    aimStick.style.left = (clientX - 23) + 'px';
+    aimStick.style.top = (clientY - 23) + 'px';
+  }
+  function aimMove(clientX, clientY) {
+    if (!aimTouching) return;
+    let dx = clientX - aimOrigin.x;
+    let dy = clientY - aimOrigin.y;
+    const maxDist = 55;
+    const dist = Math.min(Math.hypot(dx, dy), maxDist);
+    const angle = Math.atan2(dy, dx);
+    const sx = Math.cos(angle) * dist;
+    const sy = Math.sin(angle) * dist;
+    aimStick.style.left = (aimOrigin.x + sx - 23) + 'px';
+    aimStick.style.top = (aimOrigin.y + sy - 23) + 'px';
+    if (dist > AIM_DEADZONE) {
+      aiming = true;
+      aimVec = { x: sx / dist, y: sy / dist };
+    } else {
+      aiming = false;
+    }
+  }
+  function aimEnd() {
+    // kurzer Tap ohne nennenswerten Zug = Nahkampfangriff
+    if (aimTouching && !aiming && performance.now() - aimTouchStartTime < 350) {
+      doAttack();
+    }
+    aimTouching = false;
+    aimTouchId = null;
+    aiming = false;
+    aimVec = { x: 0, y: 0 };
+    aimBase.style.display = 'none';
+    aimStick.style.display = 'none';
+  }
+  // Touch-Identifier verfolgen: verhindert, dass der Bewegungs-Daumen versehentlich
+  // als Ziel-Input gelesen wird, wenn beide Zonen gleichzeitig berührt werden.
+  aimZone.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (aimTouchId !== null) return; // schon ein aktiver Finger hier
+    const t = e.changedTouches[0];
+    aimTouchId = t.identifier;
+    aimStart(t.clientX, t.clientY);
+  }, {passive:false});
+  aimZone.addEventListener('touchmove', e => {
+    e.preventDefault();
+    const t = Array.from(e.touches).find(t => t.identifier === aimTouchId);
+    if (t) aimMove(t.clientX, t.clientY);
+  }, {passive:false});
+  aimZone.addEventListener('touchend', e => {
+    e.preventDefault();
+    const ended = Array.from(e.changedTouches).some(t => t.identifier === aimTouchId);
+    if (ended) aimEnd();
+  }, {passive:false});
+  aimZone.addEventListener('touchcancel', e => {
+    e.preventDefault();
+    const ended = Array.from(e.changedTouches).some(t => t.identifier === aimTouchId);
+    if (ended) aimEnd();
+  }, {passive:false});
+  // mouse fallback
+  aimZone.addEventListener('mousedown', e => aimStart(e.clientX, e.clientY));
+  window.addEventListener('mousemove', e => { if (aimTouching) aimMove(e.clientX, e.clientY); });
+  window.addEventListener('mouseup', () => aimEnd());
+
+  // ---------- INVENTAR / AUSRÜSTUNG ----------
+  function getEquippedWeapon() {
+    if (player.equippedWeaponIndex < 0) return null;
+    const id = player.weapons[player.equippedWeaponIndex];
+    return id ? WEAPON_CATALOG[id] : null;
+  }
+
+  function addWeaponToInventory(id) {
+    if (player.weapons.length >= CFG.maxWeaponSlots) {
+      // Inventar voll: älteste Waffe fällt raus, neue rutscht nach
+      player.weapons.shift();
+      if (player.equippedWeaponIndex > 0) player.equippedWeaponIndex--;
+    }
+    player.weapons.push(id);
+    const newIndex = player.weapons.length - 1;
+    log(`${WEAPON_CATALOG[id].icon} ${WEAPON_CATALOG[id].name} ins Inventar gelegt.`, 'success');
+    if (player.equippedWeaponIndex < 0) {
+      equipWeapon(newIndex);
+    } else {
+      log('Tippe auf die Waffen-Anzeige zum Wechseln.', 'success');
+    }
+  }
+
+  function equipWeapon(index) {
+    player.equippedWeaponIndex = index;
+    const w = getEquippedWeapon();
+    player.ammo = w.magazineSize;
+    player.reloading = false;
+    player.reloadTimer = 0;
+    player.fireCooldown = 0;
+    log(`${w.icon} ${w.name} ausgerüstet.`, 'success');
+  }
+
+  function cycleWeapon() {
+    if (player.weapons.length === 0) {
+      log('🔒 Noch keine Waffe im Inventar.', 'error');
+      return;
+    }
+    if (player.weapons.length === 1) {
+      log('Nur eine Waffe im Inventar.', 'error');
+      return;
+    }
+    const nextIndex = (player.equippedWeaponIndex + 1) % player.weapons.length;
+    equipWeapon(nextIndex);
+  }
+  document.getElementById('ammoBox').addEventListener('click', cycleWeapon);
+  addPressFeedback(document.getElementById('ammoBox'));
+
+  function tryFireGun(dt) {
+    const weapon = getEquippedWeapon();
+    if (!weapon) {
+      // ohne ausgerüstete Waffe: einmaliger Hinweis pro Ziehversuch, kein Feuern möglich
+      if (aiming && (aimVec.x !== 0 || aimVec.y !== 0) && !player.noGunWarned) {
+        player.noGunWarned = true;
+        log('🔒 Keine Waffe ausgerüstet — nutze den Nahkampf!', 'error');
+      }
+      if (!aiming) player.noGunWarned = false;
+      return;
+    }
+    if (player.reloading) {
+      player.reloadTimer -= dt;
+      if (player.reloadTimer <= 0) {
+        player.reloading = false;
+        player.ammo = weapon.magazineSize;
+        log('Nachgeladen!', 'success');
+      }
+      return;
+    }
+    if (player.fireCooldown > 0) player.fireCooldown -= dt;
+    if (aiming && (aimVec.x !== 0 || aimVec.y !== 0)) {
+      player.facing = { x: aimVec.x, y: aimVec.y };
+      if (player.fireCooldown <= 0 && player.ammo > 0) {
+        const pelletCount = weapon.pellets || 1;
+        for (let p = 0; p < pelletCount; p++) {
+          // Streuung bei Mehrfach-Projektilen (z.B. Schrotflinte)
+          const spread = pelletCount > 1 ? (Math.random() - 0.5) * 0.35 : 0;
+          const angle = Math.atan2(aimVec.y, aimVec.x) + spread;
+          bullets.push({
+            x: player.x, y: player.y,
+            vx: Math.cos(angle) * CFG.bulletSpeed, vy: Math.sin(angle) * CFG.bulletSpeed,
+            life: weapon.range / CFG.bulletSpeed, dmg: weapon.damage,
+          });
+        }
+        particles.push({ x: player.x + aimVec.x*14, y: player.y + aimVec.y*14, life: 0.1, type: 'muzzle' });
+        player.ammo--;
+        player.fireCooldown = weapon.fireCooldown;
+        if (player.ammo <= 0) {
+          player.reloading = true;
+          player.reloadTimer = weapon.reloadTime;
+          log('Nachladen...', 'error');
+        }
+      }
+    }
+  }
+
+  function updateWeaponPickup() {
+    if (!weaponPickup || weaponPickup.collected) return;
+    if (Math.hypot(player.x - weaponPickup.x, player.y - weaponPickup.y) < 24) {
+      weaponPickup.collected = true;
+      particles.push({ x: weaponPickup.x, y: weaponPickup.y, life: 0.5, maxLife: 0.5, type: 'doorFx' });
+      addWeaponToInventory('pistole');
+    }
+  }
+
+  const CHEST_OPEN_DURATION = 1.1; // Sekunden für die Öffnungsanimation
+
+  function rollLoot() {
+    const totalWeight = LOOT_TABLE.reduce((sum, e) => sum + e.weight, 0);
+    let roll = Math.random() * totalWeight;
+    for (const entry of LOOT_TABLE) {
+      roll -= entry.weight;
+      if (roll <= 0) {
+        if (entry.type === 'weapon') {
+          addWeaponToInventory(entry.id);
+        } else if (entry.type === 'resource') {
+          if (entry.id === 'wood') wood += entry.amount; else stone += entry.amount;
+          log(`📦 Truhe enthielt ${entry.amount} ${entry.id === 'wood' ? '🪵 Holz' : '🪨 Stein'}!`, 'success');
+        }
+        return;
+      }
+    }
+  }
+
+  function updateChest(dt) {
+    if (!chest || chest.opened) return;
+    if (!chest.opening) {
+      if (Math.hypot(player.x - chest.x, player.y - chest.y) < 30) {
+        chest.opening = true;
+        log('📦 Truhe öffnet sich...', 'success');
+      }
+      return;
+    }
+    chest.progress += dt / CHEST_OPEN_DURATION;
+    if (chest.progress >= 1) {
+      chest.progress = 1;
+      chest.opened = true;
+      particles.push({ x: chest.x, y: chest.y - 10, life: 0.5, maxLife: 0.5, type: 'doorFx' });
+      rollLoot();
+    }
+  }
+
+  // ---------- BUILD MODE ----------
+  const buildFab = document.getElementById('buildFab');
+  const buildToolRow = document.getElementById('buildToolRow');
+  const wallBtn = document.getElementById('wallBtn');
+  const doorBtn = document.getElementById('doorBtn');
+  const upgradeBtn = document.getElementById('upgradeBtn');
+  const turretBtn = document.getElementById('turretBtn');
+  const firetrapBtn = document.getElementById('firetrapBtn');
+  const allToolBtns = [wallBtn, doorBtn, upgradeBtn, turretBtn, firetrapBtn];
+
+  // Lock-Zustand der Prestige-Baubares im Menü spiegeln
+  function refreshToolLocks() {
+    turretBtn.classList.toggle('locked', !save.unlocks.turret);
+    firetrapBtn.classList.toggle('locked', !save.unlocks.firetrap);
+  }
+
+  const buildHint = document.getElementById('buildHint');
+  function updateBuildHint() {
+    if (selectedBuildTool === 'wall') {
+      buildHint.innerHTML = 'Tippe auf ein <span style="color:#9f9">grün markiertes leeres Feld</span> für eine Wand (10🪵)';
+    } else if (selectedBuildTool === 'door') {
+      buildHint.innerHTML = 'Tippe auf eine <span style="color:#fc8">orange markierte Toröffnung</span> für eine Tür (10🪵)';
+    } else if (selectedBuildTool === 'turret') {
+      buildHint.innerHTML = 'Tippe auf ein <span style="color:#fdf">violett markiertes Feld</span> für einen Pfeilturm (25🪨)';
+    } else if (selectedBuildTool === 'firetrap') {
+      buildHint.innerHTML = 'Tippe auf ein <span style="color:#fa5">rot markiertes Feld</span> für eine Feuerfalle (15🪵)';
+    } else {
+      buildHint.innerHTML = 'Tippe auf eine <span style="color:#9cf">blau markierte Wand/Tür</span> zum Upgrade (8🪨)';
+    }
+  }
+
+  function selectTool(tool, btn) {
+    if ((tool === 'turret' && !save.unlocks.turret) || (tool === 'firetrap' && !save.unlocks.firetrap)) {
+      log('🔒 Noch nicht freigeschaltet — kaufe es im Prestige-Shop nach dem Run.', 'error');
+      return;
+    }
+    selectedBuildTool = tool;
+    allToolBtns.forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    updateBuildHint();
+  }
+
+  buildFab.addEventListener('click', () => {
+    buildMode = !buildMode;
+    buildFab.classList.toggle('active', buildMode);
+    buildToolRow.classList.toggle('show', buildMode);
+    buildHint.classList.toggle('show', buildMode);
+    refreshToolLocks();
+    // Bewegungs-/Ziel-Zonen während des Bauens deaktivieren: verhindert sowohl
+    // versehentliches Laufen/Zielen als auch jeden künftigen Touch-Overlap mit dem Baumenü.
+    joystickZone.style.pointerEvents = buildMode ? 'none' : 'auto';
+    aimZone.style.pointerEvents = buildMode ? 'none' : 'auto';
+    if (buildMode) { updateBuildHint(); log('Baumodus aktiviert.', 'success'); }
+    else log('Baumodus verlassen.');
+  });
+  wallBtn.addEventListener('click', () => selectTool('wall', wallBtn));
+  doorBtn.addEventListener('click', () => selectTool('door', doorBtn));
+  upgradeBtn.addEventListener('click', () => selectTool('upgrade', upgradeBtn));
+  turretBtn.addEventListener('click', () => selectTool('turret', turretBtn));
+  firetrapBtn.addEventListener('click', () => selectTool('firetrap', firetrapBtn));
+  [buildFab, ...allToolBtns].forEach(addPressFeedback);
+
+
+  canvas.addEventListener('touchstart', handleCanvasTap, {passive:false});
+  canvas.addEventListener('mousedown', e => handleCanvasTap({ touches: [{clientX: e.clientX, clientY: e.clientY}], preventDefault: () => {} }));
+
+  function handleCanvasTap(e) {
+    if (!buildMode || !gameRunning) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    const worldX = t.clientX - canvas.width/2 + camera.x;
+    const worldY = t.clientY - canvas.height/2 + camera.y;
+    const gx = Math.floor(worldX / CFG.tile);
+    const gy = Math.floor(worldY / CFG.tile);
+
+    // range check: must be within ~4 tiles of player
+    const pgx = Math.floor(player.x / CFG.tile);
+    const pgy = Math.floor(player.y / CFG.tile);
+    if (Math.abs(gx-pgx) + Math.abs(gy-pgy) > 4) { log('Zu weit weg zum Bauen.', 'error'); return; }
+
+    const key = `${gx},${gy}`;
+    const cell = grid[key];
+
+    if (selectedBuildTool === 'wall') {
+      if (cell) { log('Feld bereits belegt.', 'error'); return; }
+      if (wood < 10) { log('Nicht genug Holz (10 benötigt).', 'error'); return; }
+      wood -= 10;
+      grid[key] = { type: 'wall', tier: 1, hp: CFG.baseWallHP[1], maxHp: CFG.baseWallHP[1] };
+      log('Wand gebaut.', 'success');
+    } else if (selectedBuildTool === 'door') {
+      const buildableOnEmpty = !cell;
+      const buildableOnEntrance = cell && cell.type === 'floor' && cell.isEntrance;
+      if (!buildableOnEmpty && !buildableOnEntrance) { log('Hier kann keine Tür hin.', 'error'); return; }
+      if (wood < 10) { log('Nicht genug Holz (10 benötigt).', 'error'); return; }
+      wood -= 10;
+      grid[key] = { type: 'door', tier: 1, hp: CFG.baseWallHP[1], maxHp: CFG.baseWallHP[1], isOpen: false };
+      log('Tür eingebaut.', 'success');
+    } else if (selectedBuildTool === 'turret') {
+      if (cell) { log('Feld bereits belegt.', 'error'); return; }
+      if (stone < CFG.turretCostStone) { log(`Nicht genug Stein (${CFG.turretCostStone} benötigt).`, 'error'); return; }
+      stone -= CFG.turretCostStone;
+      grid[key] = { type: 'turret', hp: CFG.turretHP, maxHp: CFG.turretHP, fireCooldown: 0, targetAngle: 0 };
+      log('🏹 Pfeilturm gebaut.', 'success');
+    } else if (selectedBuildTool === 'firetrap') {
+      if (cell) { log('Feld bereits belegt.', 'error'); return; }
+      if (wood < CFG.firetrapCostWood) { log(`Nicht genug Holz (${CFG.firetrapCostWood} benötigt).`, 'error'); return; }
+      wood -= CFG.firetrapCostWood;
+      grid[key] = { type: 'firetrap', fuel: CFG.firetrapFuel };
+      log('🔥 Feuerfalle gelegt.', 'success');
+    } else if (selectedBuildTool === 'upgrade') {
+      if (!cell || (cell.type !== 'wall' && cell.type !== 'door')) { log('Kein upgradebares Feld.', 'error'); return; }
+      if (cell.tier >= 2) { log('Bereits max. Tier.', 'error'); return; }
+      if (stone < 8) { log('Nicht genug Stein (8 benötigt).', 'error'); return; }
+      stone -= 8;
+      cell.tier = 2;
+      cell.maxHp = CFG.baseWallHP[2];
+      cell.hp = CFG.baseWallHP[2];
+      log(cell.type === 'door' ? 'Tür verstärkt.' : 'Wand auf Stein-Tier upgegradet.', 'success');
+    }
+    updateHUD();
+  }
+
+  // repair: tap own damaged wall while NOT in build mode triggers repair (simpler: hold attack near wall does small heal) -- simplified: repair happens automatically at reduced rate when player stands adjacent during day and has resources
+  function autoRepair(dt) {
+    if (phase !== 'day') return;
+    const pgx = Math.floor(player.x / CFG.tile);
+    const pgy = Math.floor(player.y / CFG.tile);
+    for (let dx=-1; dx<=1; dx++) {
+      for (let dy=-1; dy<=1; dy++) {
+        const gx = pgx+dx, gy = pgy+dy;
+        const cell = grid[`${gx},${gy}`];
+        if (cell && (cell.type === 'wall' || cell.type === 'door') && cell.hp < cell.maxHp) {
+          // Tier-1-Bauteile werden mit Holz repariert, Tier-2 (Stein-Upgrade) mit Stein — konsistent zu den Baukosten
+          const useStone = cell.tier === 2;
+          const cost = CFG.repairCostPerSec * dt;
+          const pool = useStone ? stone : wood;
+          if (pool >= cost) {
+            if (useStone) stone -= cost; else wood -= cost;
+            cell.hp = Math.min(cell.maxHp, cell.hp + dt * CFG.repairHealPerSec);
+
+            // sichtbares Feedback: Partikel alle 0.3s pro Zelle + einmaliger Toast beim Start
+            const cellX = gx * CFG.tile + CFG.tile/2, cellY = gy * CFG.tile + CFG.tile/2;
+            cell.repairFx = (cell.repairFx || 0) - dt;
+            if (cell.repairFx <= 0) {
+              particles.push({ x: cellX, y: cellY - 6, life: 0.3, type: 'repairSpark' });
+              cell.repairFx = 0.3;
+            }
+            if (!cell.repairAnnounced) {
+              cell.repairAnnounced = true;
+              log(`🔧 Reparatur läuft… (${useStone ? '🪨 Stein' : '🪵 Holz'})`, 'success');
+            }
+          } else if (!cell.repairBlockedAnnounced) {
+            cell.repairBlockedAnnounced = true;
+            log(`Nicht genug ${useStone ? '🪨 Stein' : '🪵 Holz'} zum Reparieren!`, 'error');
+          }
+        } else if (cell && cell.hp >= (cell.maxHp || 0)) {
+          cell.repairAnnounced = false;
+          cell.repairBlockedAnnounced = false;
+        }
+      }
+    }
+  }
+
+  // ---------- ATTACK ----------
+  const attackBtn = document.getElementById('attackBtn');
+  let attackPressed = false;
+  attackBtn.addEventListener('touchstart', e => { e.preventDefault(); attackPressed = true; doAttack(); }, {passive:false});
+  attackBtn.addEventListener('mousedown', () => { attackPressed = true; doAttack(); });
+  addPressFeedback(attackBtn);
+
+  function doAttack() {
+    if (player.attackCooldown > 0 || !gameRunning) return;
+    player.attackCooldown = CFG.playerAttackCooldown;
+    let hitAny = false;
+    zombies.forEach(z => {
+      const d = Math.hypot(z.x - player.x, z.y - player.y);
+      if (d < CFG.playerAttackRange) {
+        z.hp -= CFG.playerAttackDamage;
+        z.hitFlash = 0.15;
+        hitAny = true;
+        particles.push({x: z.x, y: z.y, life: 0.2, type:'hit'});
+        spawnDamageNumber(z.x, z.y - 14, CFG.playerAttackDamage);
+      }
+    });
+    if (hitAny) {
+      addShake(3);
+      hitStopTimer = 0.05; // kurze Mikropause für Wucht-Gefühl
+    }
+  }
+
+  // Damage-Zahlen: aufsteigende Treffer-Werte
+  function spawnDamageNumber(x, y, amount) {
+    particles.push({
+      x: x + (Math.random()-0.5)*8, y,
+      life: 0.7, maxLife: 0.7, type: 'dmgNum',
+      text: '-' + Math.round(amount),
+    });
+  }
+  let hitStopTimer = 0;
+
+  // ---------- MAIN LOOP ----------
+  let lastTime = performance.now();
+
+  function update(dt) {
+    // movement
+    let mvx = 0, mvy = 0;
+    if (joystickActive) {
+      mvx = joystickVec.x;
+      mvy = joystickVec.y;
+    } else {
+      if (keys['w'] || keys['arrowup']) mvy -= 1;
+      if (keys['s'] || keys['arrowdown']) mvy += 1;
+      if (keys['a'] || keys['arrowleft']) mvx -= 1;
+      if (keys['d'] || keys['arrowright']) mvx += 1;
+      const len = Math.hypot(mvx, mvy);
+      if (len > 0) { mvx /= len; mvy /= len; }
+    }
+    if (mvx !== 0 || mvy !== 0) {
+      player.facing = { x: mvx, y: mvy };
+      const newX = player.x + mvx * CFG.playerSpeed * dt;
+      const newY = player.y + mvy * CFG.playerSpeed * dt;
+      if (!collidesWithWall(newX, player.y)) player.x = newX;
+      if (!collidesWithWall(player.x, newY)) player.y = newY;
+      player.x = Math.max(10, Math.min(world.worldSize-10, player.x));
+      player.y = Math.max(10, Math.min(world.worldSize-10, player.y));
+    }
+
+    if (player.attackCooldown > 0) player.attackCooldown -= dt;
+    if (shake.intensity > 0) shake.intensity = Math.max(0, shake.intensity - shake.decay * dt);
+    if (baseUnderAttackTimer > 0) baseUnderAttackTimer -= dt;
+    else baseAttackAnnounced = false;
+
+    revealFog(player.x, player.y, CFG.visionRadius);
+    updateDoors();
+    updateTurrets(dt);
+    updateFiretraps(dt);
+
+    tryFireGun(dt);
+    updateWeaponPickup();
+    updateChest(dt);
+    updateBullets(dt);
+
+    // gather resources
+    resourceNodes.forEach(node => {
+      node.isGathering = false;
+      if (node.amount <= 0) {
+        node.respawnTimer -= dt;
+        if (node.respawnTimer <= 0) { node.amount = node.maxAmount; }
+        return;
+      }
+      const d = Math.hypot(node.x - player.x, node.y - player.y);
+      if (d < 26) {
+        node.isGathering = true;
+        const gathered = Math.min(node.amount, CFG.gatherRate * dt);
+        node.amount -= gathered;
+        if (node.type === 'wood') wood += gathered; else stone += gathered;
+        if (node.amount <= 0) node.respawnTimer = CFG.resourceRespawnTime;
+
+        // Text-Popup
+        node.gatherFx = (node.gatherFx || 0) - dt;
+        if (node.gatherFx <= 0) {
+          particles.push({
+            x: node.x, y: node.y - 10, life: 0.6, type: 'gatherText',
+            text: node.type === 'wood' ? '+🪵' : '+🪨',
+          });
+          node.gatherFx = 0.4;
+        }
+
+        // Splitter-Partikel (Holzspäne / Steinsplitter)
+        node.chipFx = (node.chipFx || 0) - dt;
+        if (node.chipFx <= 0) {
+          const angle = Math.random() * Math.PI * 2;
+          particles.push({
+            x: node.x, y: node.y, life: 0.35, type: 'chip',
+            color: node.type === 'wood' ? '#7a5230' : '#999',
+            vx: Math.cos(angle) * 40, vy: Math.sin(angle) * 40,
+          });
+          node.chipFx = 0.12;
+        }
+      }
+    });
+
+    autoRepair(dt);
+
+    // phase timer
+    phaseTimer -= dt;
+    if (phase === 'day' && phaseTimer <= 0) {
+      phase = 'night';
+      phaseTimer = CFG.nightDuration;
+      waveCount++;
+      spawnWave();
+      log(`🌙 Nacht ${waveCount} beginnt!`);
+    } else if (phase === 'night' && phaseTimer <= 0 && zombies.length === 0) {
+      phase = 'day';
+      dayCount++;
+      phaseTimer = CFG.dayDuration;
+      applyPassiveDecay();
+      log(`☀️ Tag ${dayCount} beginnt.`);
+    } else if (phase === 'night' && phaseTimer <= -30) {
+      // safety: force day if zombies linger too long
+      phase = 'day';
+      dayCount++;
+      phaseTimer = CFG.dayDuration;
+      applyPassiveDecay();
+    }
+
+    // zombies
+    zombies.forEach(z => updateZombie(z, dt));
+    zombies = zombies.filter(z => {
+      if (z.hp <= 0) {
+        zombiesKilled++;
+        // drop small resource
+        if (Math.random() < 0.5) wood += 3; else stone += 2;
+        // Todesanimation: umfallender Körper + Blut-Splatter
+        particles.push({ x: z.x, y: z.y, life: 0.6, maxLife: 0.6, type: 'zombieDeath', isBrecher: z.type === 'brecher' });
+        for (let s = 0; s < 5; s++) {
+          const ang = Math.random() * Math.PI * 2;
+          particles.push({ x: z.x, y: z.y, life: 0.4, type: 'chip', color: '#5a1a1a',
+            vx: Math.cos(ang) * 60, vy: Math.sin(ang) * 60 });
+        }
+        return false;
+      }
+      return true;
+    });
+
+    // particles
+    particles.forEach(p => {
+      p.life -= dt;
+      if (p.vx !== undefined) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 60 * dt; }
+    });
+    particles = particles.filter(p => p.life > 0);
+
+    if (baseHP <= 0 || playerHP <= 0) {
+      endRun();
+    }
+
+    updateHUD();
+  }
+
+  function updateBullets(dt) {
+    bullets.forEach(b => {
+      b.life -= dt;
+      if (b.life <= 0) return;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+
+      const gx = Math.floor(b.x / CFG.tile);
+      const gy = Math.floor(b.y / CFG.tile);
+      const key = `${gx},${gy}`;
+      const cell = grid[key];
+      const inOwnCell = b.ignoreKey && key === b.ignoreKey;
+      const blockedByDoor = cell && cell.type === 'door' && !cell.isOpen && cell.hp > 0;
+      const blockedByWall = cell && cell.type === 'wall' && cell.hp > 0;
+      const blockedByTurret = cell && cell.type === 'turret' && cell.hp > 0;
+
+      if (!inOwnCell && (blockedByWall || blockedByDoor || blockedByTurret)) {
+        if (b.hostile) {
+          // Spucke frisst sich in Strukturen
+          cell.hp -= b.dmg;
+          spawnDamageNumber(b.x, b.y - 8, b.dmg);
+          if (cell.hp <= 0) delete grid[key];
+        }
+        b.life = 0;
+        particles.push({ x: b.x, y: b.y, life: 0.15, type: b.hostile ? 'acidSplat' : 'hit', maxLife: 0.15 });
+        return;
+      }
+
+      if (b.hostile) {
+        // feindliches Projektil: trifft den Spieler
+        if (Math.hypot(player.x - b.x, player.y - b.y) < 14) {
+          playerHP -= b.dmg;
+          b.life = 0;
+          particles.push({ x: b.x, y: b.y, life: 0.15, type: 'acidSplat', maxLife: 0.15 });
+          addShake(2.5);
+        }
+        return;
+      }
+
+      for (const z of zombies) {
+        if (Math.hypot(z.x - b.x, z.y - b.y) < 14) {
+          z.hp -= b.dmg;
+          z.hitFlash = 0.15;
+          b.life = 0;
+          particles.push({ x: b.x, y: b.y, life: 0.15, type: 'hit' });
+          spawnDamageNumber(z.x, z.y - 14, b.dmg);
+          addShake(1.2);
+          break;
+        }
+      }
+    });
+    bullets = bullets.filter(b => b.life > 0);
+  }
+
+  function revealFog(x, y, radius) {
+    fogCtx.save();
+    fogCtx.globalCompositeOperation = 'destination-out';
+    const grad = fogCtx.createRadialGradient(x, y, radius*0.3, x, y, radius);
+    grad.addColorStop(0, 'rgba(0,0,0,1)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    fogCtx.fillStyle = grad;
+    fogCtx.beginPath();
+    fogCtx.arc(x, y, radius, 0, Math.PI*2);
+    fogCtx.fill();
+    fogCtx.restore();
+  }
+
+  // Pfeiltürme: erfassen nächsten Zombie in Reichweite, drehen sichtbar den Kopf, feuern Bolzen
+  function updateTurrets(dt) {
+    Object.entries(grid).forEach(([key, cell]) => {
+      if (cell.type !== 'turret') return;
+      const [gx, gy] = key.split(',').map(Number);
+      const tx = gx * CFG.tile + CFG.tile/2;
+      const ty = gy * CFG.tile + CFG.tile/2;
+      if (cell.fireCooldown > 0) cell.fireCooldown -= dt;
+
+      // nächstes Ziel in Reichweite suchen
+      let best = null, bestDist = CFG.turretRange;
+      for (const z of zombies) {
+        const d = Math.hypot(z.x - tx, z.y - ty);
+        if (d < bestDist) { best = z; bestDist = d; }
+      }
+      if (!best) return;
+      cell.targetAngle = Math.atan2(best.y - ty, best.x - tx);
+      if (cell.fireCooldown <= 0) {
+        cell.fireCooldown = CFG.turretFireCooldown;
+        bullets.push({
+          x: tx + Math.cos(cell.targetAngle) * 12,
+          y: ty + Math.sin(cell.targetAngle) * 12,
+          vx: Math.cos(cell.targetAngle) * CFG.bulletSpeed * 0.7,
+          vy: Math.sin(cell.targetAngle) * CFG.bulletSpeed * 0.7,
+          life: CFG.turretRange / (CFG.bulletSpeed * 0.7),
+          dmg: CFG.turretDamage,
+          isBolt: true,       // optische Unterscheidung: brauner Bolzen
+          ignoreKey: key,     // eigene Zelle nicht als Kollision werten
+        });
+      }
+    });
+  }
+
+  // Feuerfallen: verbrennen Zombies auf dem Feld, verbrauchen dabei Brennstoff, leuchten nachts
+  function updateFiretraps(dt) {
+    Object.entries(grid).forEach(([key, cell]) => {
+      if (cell.type !== 'firetrap') return;
+      const [gx, gy] = key.split(',').map(Number);
+      let burningAny = false;
+      for (const z of zombies) {
+        const zgx = Math.floor(z.x / CFG.tile), zgy = Math.floor(z.y / CFG.tile);
+        if (zgx === gx && zgy === gy) {
+          z.hp -= CFG.firetrapDPS * dt;
+          z.hitFlash = Math.max(z.hitFlash || 0, 0.08);
+          burningAny = true;
+          // Flammenpartikel am Zombie
+          if (Math.random() < 0.3) {
+            particles.push({ x: z.x + (Math.random()-0.5)*10, y: z.y - 6, life: 0.3, type: 'chip',
+              color: Math.random() < 0.5 ? '#ff8833' : '#ffcc33', vx: (Math.random()-0.5)*20, vy: -40 });
+          }
+        }
+      }
+      if (burningAny) {
+        cell.fuel -= dt;
+        if (cell.fuel <= 0) {
+          delete grid[key];
+          particles.push({ x: gx*CFG.tile + CFG.tile/2, y: gy*CFG.tile + CFG.tile/2, life: 0.4, maxLife: 0.4, type: 'doorFx' });
+        }
+      }
+    });
+  }
+
+  function updateDoors() {
+    Object.entries(grid).forEach(([key, cell]) => {
+      if (cell.type !== 'door') return;
+      const [gx, gy] = key.split(',').map(Number);
+      const doorX = gx * CFG.tile + CFG.tile/2;
+      const doorY = gy * CFG.tile + CFG.tile/2;
+      const wasOpen = cell.isOpen;
+      cell.isOpen = Math.hypot(player.x - doorX, player.y - doorY) < CFG.doorOpenRadius;
+      if (cell.isOpen && !wasOpen) {
+        particles.push({ x: doorX, y: doorY, life: 0.3, maxLife: 0.3, type: 'doorFx' });
+      }
+    });
+  }
+
+  function collidesWithWall(x, y) {
+    const gx = Math.floor(x / CFG.tile);
+    const gy = Math.floor(y / CFG.tile);
+    const cell = grid[`${gx},${gy}`];
+    if (cell && cell.type === 'door') return !cell.isOpen && cell.hp > 0;
+    return cell && (cell.type === 'wall' || cell.type === 'turret') && cell.hp > 0;
+  }
+
+  function spawnWave() {
+    const baseCount = 3 + Math.floor(waveCount * 1.6);
+    const hpMult = Math.pow(1.18, waveCount);
+    for (let i = 0; i < baseCount; i++) {
+      const edge = Math.floor(Math.random()*4);
+      let x, y;
+      const ws = world.worldSize;
+      if (edge === 0) { x = Math.random()*ws; y = -20; }
+      else if (edge === 1) { x = ws+20; y = Math.random()*ws; }
+      else if (edge === 2) { x = Math.random()*ws; y = ws+20; }
+      else { x = -20; y = Math.random()*ws; }
+
+      // Typ-Mix: Spucker erst ab Nacht 3 (Konter gegen Turm-hinter-Mauer-Taktik)
+      const roll = Math.random();
+      let type;
+      const spitterChance = waveCount >= 3 ? Math.min(0.10 + (waveCount-3)*0.02, 0.3) : 0;
+      const brecherChance = Math.min(0.15 + waveCount*0.03, 0.5);
+      if (roll < spitterChance) type = 'spucker';
+      else if (roll < spitterChance + brecherChance) type = 'brecher';
+      else type = 'laeufer';
+
+      const baseHp = type === 'brecher' ? 60 : (type === 'spucker' ? 30 : 20);
+      zombies.push({
+        x, y, type,
+        hp: baseHp * hpMult,
+        maxHp: baseHp * hpMult,
+        speed: type === 'brecher' ? 28 : (type === 'spucker' ? 38 : 55),
+        dmg: type === 'brecher' ? 18 : (type === 'spucker' ? 10 : 8),
+        attackCooldown: 0,
+        targetCell: null,
+      });
+    }
+    peakZombieCount = zombies.length;
+  }
+
+  const centerX = Math.floor(CFG.gridSize/2) * CFG.tile + CFG.tile/2;
+  const centerY = Math.floor(CFG.gridSize/2) * CFG.tile + CFG.tile/2;
+
+  function updateZombie(z, dt) {
+    if (z.attackCooldown > 0) z.attackCooldown -= dt;
+
+    // determine direction toward center
+    const dx = centerX - z.x;
+    const dy = centerY - z.y;
+    const dist = Math.hypot(dx, dy);
+    const dirX = dx/dist, dirY = dy/dist;
+
+    // Spucker: hält Abstand und beschießt die nächste Struktur (oder den Spieler) mit Säure
+    if (z.type === 'spucker') {
+      // nächstgelegenes Struktur-Ziel suchen (Wand, Tür, Turm) — sonst Richtung Kern
+      let targetX = centerX, targetY = centerY, targetDist = dist;
+      for (const [key, cell] of Object.entries(grid)) {
+        if (cell.type !== 'wall' && cell.type !== 'door' && cell.type !== 'turret') continue;
+        const [cgx, cgy] = key.split(',').map(Number);
+        const sx = cgx * CFG.tile + CFG.tile/2, sy = cgy * CFG.tile + CFG.tile/2;
+        const d = Math.hypot(sx - z.x, sy - z.y);
+        if (d < targetDist) { targetX = sx; targetY = sy; targetDist = d; }
+      }
+      // Spieler als Ziel bevorzugen, wenn er näher als die Struktur ist
+      const pd2 = Math.hypot(player.x - z.x, player.y - z.y);
+      if (pd2 < targetDist) { targetX = player.x; targetY = player.y; targetDist = pd2; }
+
+      if (targetDist <= CFG.spitterRange) {
+        // in Reichweite: stehenbleiben und spucken
+        if (z.attackCooldown <= 0) {
+          z.attackCooldown = 2.2;
+          const ang = Math.atan2(targetY - z.y, targetX - z.x);
+          bullets.push({
+            x: z.x, y: z.y,
+            vx: Math.cos(ang) * CFG.spitterProjectileSpeed,
+            vy: Math.sin(ang) * CFG.spitterProjectileSpeed,
+            life: (CFG.spitterRange + 40) / CFG.spitterProjectileSpeed,
+            dmg: z.dmg, hostile: true,
+          });
+        }
+        return;
+      }
+      // sonst auf das Ziel zubewegen
+      const mAng = Math.atan2(targetY - z.y, targetX - z.x);
+      z.x += Math.cos(mAng) * z.speed * dt;
+      z.y += Math.sin(mAng) * z.speed * dt;
+      return;
+    }
+
+    // check tile ahead for wall
+    const aheadX = z.x + dirX * CFG.tile*0.6;
+    const aheadY = z.y + dirY * CFG.tile*0.6;
+    const gx = Math.floor(aheadX / CFG.tile);
+    const gy = Math.floor(aheadY / CFG.tile);
+    const cell = grid[`${gx},${gy}`];
+
+    if (cell && (cell.type === 'wall' || cell.type === 'door' || cell.type === 'turret') && cell.hp > 0) {
+      // attack wall
+      if (z.attackCooldown <= 0) {
+        cell.hp -= z.dmg;
+        z.attackCooldown = 0.8;
+        particles.push({x: aheadX, y: aheadY, life:0.15, type:'hit'});
+        // spürbarer Einschlag, aber nur wenn der Spieler nah genug ist (kein Dauerwackeln aus der Ferne)
+        if (Math.hypot(player.x - aheadX, player.y - aheadY) < 180) addShake(1.2);
+        if (cell.hp <= 0) delete grid[`${gx},${gy}`];
+      }
+      return;
+    }
+
+    if (cell && cell.type === 'core') {
+      // reached core - damage base
+      if (z.attackCooldown <= 0) {
+        baseHP -= z.dmg;
+        z.attackCooldown = 0.8;
+        baseUnderAttackTimer = 2.5; // Richtungspfeil-Warnung aktivieren
+        addShake(2);
+        if (!baseAttackAnnounced) {
+          baseAttackAnnounced = true;
+          log('🚨 DEINE BASIS WIRD ANGEGRIFFEN!', 'error');
+        }
+      }
+      return;
+    }
+
+    // check distance to player - attack if close
+    const pd = Math.hypot(player.x - z.x, player.y - z.y);
+    if (pd < 22) {
+      if (z.attackCooldown <= 0) {
+        playerHP -= z.dmg * 0.6;
+        z.attackCooldown = 0.8;
+      }
+      return;
+    }
+
+    // move
+    z.x += dirX * z.speed * dt;
+    z.y += dirY * z.speed * dt;
+  }
+
+  function applyPassiveDecay() {
+    Object.values(grid).forEach(cell => {
+      if (cell.type === 'wall' || cell.type === 'door') {
+        cell.hp -= CFG.passiveDecayPerNight;
+        if (cell.hp <= 0) {
+          // mark for removal
+          cell.hp = 0;
+        }
+      }
+    });
+    Object.keys(grid).forEach(key => {
+      if ((grid[key].type === 'wall' || grid[key].type === 'door') && grid[key].hp <= 0) delete grid[key];
+    });
+  }
+
+  // ---------- RENDER ----------
+  // Boden-Textur: einmalig prozedural erzeugt (Grasflecken, Halme, Steinchen),
+  // danach nur noch als Bild gestempelt — praktisch kostenlose Atmosphäre.
+  let groundCanvas = null;
+  function buildGroundTexture() {
+    groundCanvas = document.createElement('canvas');
+    groundCanvas.width = CFG.tile * CFG.gridSize;
+    groundCanvas.height = CFG.tile * CFG.gridSize;
+    const g = groundCanvas.getContext('2d');
+    g.fillStyle = '#1d301b';
+    g.fillRect(0, 0, groundCanvas.width, groundCanvas.height);
+
+    // große weiche Farbflecken für Bodenvariation
+    for (let i = 0; i < 220; i++) {
+      const x = Math.random() * groundCanvas.width;
+      const y = Math.random() * groundCanvas.height;
+      const r = 12 + Math.random() * 30;
+      g.fillStyle = Math.random() < 0.5 ? 'rgba(34,58,32,0.4)' : 'rgba(22,40,20,0.4)';
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+    }
+    // Grashalme
+    g.strokeStyle = 'rgba(70,110,60,0.5)';
+    g.lineWidth = 1;
+    for (let i = 0; i < 700; i++) {
+      const x = Math.random() * groundCanvas.width;
+      const y = Math.random() * groundCanvas.height;
+      const h = 3 + Math.random() * 4;
+      const lean = (Math.random() - 0.5) * 3;
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x + lean, y - h);
+      g.stroke();
+    }
+    // Steinchen & dunkle Erd-Pixel
+    for (let i = 0; i < 260; i++) {
+      const x = Math.random() * groundCanvas.width;
+      const y = Math.random() * groundCanvas.height;
+      g.fillStyle = Math.random() < 0.4 ? 'rgba(110,110,100,0.35)' : 'rgba(10,18,10,0.5)';
+      g.fillRect(x, y, 2, 2);
+    }
+    // dezente Grid-Linien direkt in die Textur backen
+    g.strokeStyle = 'rgba(255,255,255,0.025)';
+    for (let i = 0; i <= CFG.gridSize; i++) {
+      g.beginPath(); g.moveTo(i*CFG.tile, 0); g.lineTo(i*CFG.tile, groundCanvas.height); g.stroke();
+      g.beginPath(); g.moveTo(0, i*CFG.tile); g.lineTo(groundCanvas.width, i*CFG.tile); g.stroke();
+    }
+  }
+
+  function render() {
+    ctx.fillStyle = '#101c10';
+    ctx.fillRect(0,0,canvas.width, canvas.height);
+
+    camera.x = player.x;
+    camera.y = player.y;
+
+    ctx.save();
+    const shakeX = shake.intensity > 0.1 ? (Math.random()-0.5) * shake.intensity : 0;
+    const shakeY = shake.intensity > 0.1 ? (Math.random()-0.5) * shake.intensity : 0;
+    ctx.translate(canvas.width/2 - camera.x + shakeX, canvas.height/2 - camera.y + shakeY);
+
+    // Boden
+    if (!groundCanvas) buildGroundTexture();
+    ctx.drawImage(groundCanvas, 0, 0);
+
+    // build-mode: highlight reachable/buildable tiles so it's obvious where to tap
+    if (buildMode) {
+      const pgx = Math.floor(player.x / CFG.tile);
+      const pgy = Math.floor(player.y / CFG.tile);
+      const pulse = 0.35 + Math.sin(performance.now()/220) * 0.15;
+      for (let dx = -4; dx <= 4; dx++) {
+        for (let dy = -4; dy <= 4; dy++) {
+          if (Math.abs(dx) + Math.abs(dy) > 4) continue;
+          const gx = pgx + dx, gy = pgy + dy;
+          if (gx < 0 || gy < 0 || gx >= CFG.gridSize || gy >= CFG.gridSize) continue;
+          const key = `${gx},${gy}`;
+          const cell = grid[key];
+          const px = gx * CFG.tile, py = gy * CFG.tile;
+
+          if (selectedBuildTool === 'wall' && !cell) {
+            ctx.fillStyle = `rgba(120,255,120,${pulse})`;
+            ctx.fillRect(px+3, py+3, CFG.tile-6, CFG.tile-6);
+            ctx.strokeStyle = 'rgba(140,255,140,0.6)';
+            ctx.strokeRect(px+3, py+3, CFG.tile-6, CFG.tile-6);
+          } else if (selectedBuildTool === 'door' && (!cell || (cell.type === 'floor' && cell.isEntrance))) {
+            ctx.fillStyle = `rgba(255,180,90,${pulse})`;
+            ctx.fillRect(px+3, py+3, CFG.tile-6, CFG.tile-6);
+            ctx.strokeStyle = 'rgba(255,190,110,0.6)';
+            ctx.strokeRect(px+3, py+3, CFG.tile-6, CFG.tile-6);
+          } else if (selectedBuildTool === 'turret' && !cell) {
+            ctx.fillStyle = `rgba(210,140,255,${pulse})`;
+            ctx.fillRect(px+3, py+3, CFG.tile-6, CFG.tile-6);
+            ctx.strokeStyle = 'rgba(220,160,255,0.6)';
+            ctx.strokeRect(px+3, py+3, CFG.tile-6, CFG.tile-6);
+          } else if (selectedBuildTool === 'firetrap' && !cell) {
+            ctx.fillStyle = `rgba(255,110,60,${pulse})`;
+            ctx.fillRect(px+3, py+3, CFG.tile-6, CFG.tile-6);
+            ctx.strokeStyle = 'rgba(255,140,80,0.6)';
+            ctx.strokeRect(px+3, py+3, CFG.tile-6, CFG.tile-6);
+          } else if (selectedBuildTool === 'upgrade' && cell && (cell.type === 'wall' || cell.type === 'door') && cell.tier < 2) {
+            ctx.fillStyle = `rgba(120,180,255,${pulse})`;
+            ctx.fillRect(px+3, py+3, CFG.tile-6, CFG.tile-6);
+            ctx.strokeStyle = 'rgba(140,200,255,0.6)';
+            ctx.strokeRect(px+3, py+3, CFG.tile-6, CFG.tile-6);
+          }
+        }
+      }
+    }
+
+    // grid cells (walls & core)
+    Object.entries(grid).forEach(([key, cell]) => {
+      const [gx, gy] = key.split(',').map(Number);
+      const px = gx * CFG.tile, py = gy * CFG.tile;
+      if (cell.type === 'core') {
+        ctx.fillStyle = 'rgba(255,215,0,0.15)';
+        ctx.fillRect(px, py, CFG.tile, CFG.tile);
+        ctx.strokeStyle = 'rgba(255,215,0,0.4)';
+        ctx.strokeRect(px, py, CFG.tile, CFG.tile);
+      } else if (cell.type === 'floor') {
+        // verwitterter Steinboden im Inneren des Außenpostens
+        ctx.fillStyle = cell.isEntrance ? 'rgba(90,70,50,0.55)' : 'rgba(70,65,55,0.65)';
+        ctx.fillRect(px, py, CFG.tile, CFG.tile);
+        ctx.strokeStyle = 'rgba(120,110,90,0.4)';
+        ctx.strokeRect(px+1, py+1, CFG.tile-2, CFG.tile-2);
+        if (cell.isEntrance) {
+          // Torlücke: helle Schwelle markiert den Eingang
+          ctx.fillStyle = 'rgba(255,210,120,0.3)';
+          ctx.fillRect(px, py + CFG.tile/2 - 2, CFG.tile, 4);
+        }
+        if (cell.isCenter) {
+          ctx.font = '16px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('🔥', px + CFG.tile/2, py + CFG.tile/2 + 6);
+          ctx.textAlign = 'left';
+        }
+      } else if (cell.type === 'turret') {
+        const tcx = px + CFG.tile/2, tcy = py + CFG.tile/2;
+        // Steinsockel
+        ctx.fillStyle = '#6a6a64';
+        ctx.beginPath();
+        ctx.arc(tcx, tcy, 12, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx.beginPath();
+        ctx.arc(tcx-3, tcy-3, 5, 0, Math.PI*2);
+        ctx.fill();
+        // rotierender Armbrust-Kopf zeigt sichtbar aufs Ziel
+        ctx.save();
+        ctx.translate(tcx, tcy);
+        ctx.rotate(cell.targetAngle || 0);
+        ctx.fillStyle = '#7a5228';
+        ctx.fillRect(-4, -4, 16, 8);          // Lauf
+        ctx.fillStyle = '#4a3016';
+        ctx.fillRect(-7, -6, 6, 12);          // Heck
+        ctx.strokeStyle = '#d8c8a0';           // gespannte Sehne
+        ctx.beginPath();
+        ctx.moveTo(10, -6); ctx.lineTo(4, 0); ctx.lineTo(10, 6);
+        ctx.stroke();
+        ctx.restore();
+        // hp bar
+        const tpct = cell.hp / cell.maxHp;
+        ctx.fillStyle = '#222';
+        ctx.fillRect(px+2, py-4, CFG.tile-4, 3);
+        ctx.fillStyle = tpct > 0.5 ? '#4c4' : (tpct > 0.25 ? '#cc4' : '#c44');
+        ctx.fillRect(px+2, py-4, (CFG.tile-4)*tpct, 3);
+      } else if (cell.type === 'firetrap') {
+        const fcx = px + CFG.tile/2, fcy = py + CFG.tile/2;
+        const ft = performance.now()/1000;
+        // verkohlter Boden
+        ctx.fillStyle = 'rgba(20,12,8,0.7)';
+        ctx.beginPath();
+        ctx.arc(fcx, fcy, 12, 0, Math.PI*2);
+        ctx.fill();
+        // drei flackernde Flammenzungen, Größe skaliert mit Rest-Brennstoff
+        const fuelPct = cell.fuel / CFG.firetrapFuel;
+        for (let f = 0; f < 3; f++) {
+          const fx2 = fcx + (f-1) * 7;
+          const flick = (0.7 + Math.sin(ft*9 + f*2.1) * 0.3) * (0.5 + fuelPct*0.5);
+          const h = 12 * flick;
+          ctx.fillStyle = 'rgba(255,120,30,0.85)';
+          ctx.beginPath();
+          ctx.moveTo(fx2-4, fcy+4);
+          ctx.quadraticCurveTo(fx2, fcy+4-h*1.4, fx2+4, fcy+4);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(255,220,80,0.9)';
+          ctx.beginPath();
+          ctx.moveTo(fx2-2, fcy+4);
+          ctx.quadraticCurveTo(fx2, fcy+4-h*0.8, fx2+2, fcy+4);
+          ctx.fill();
+        }
+        // Brennstoff-Balken
+        ctx.fillStyle = '#222';
+        ctx.fillRect(px+2, py-4, CFG.tile-4, 3);
+        ctx.fillStyle = '#f83';
+        ctx.fillRect(px+2, py-4, (CFG.tile-4)*fuelPct, 3);
+      } else if (cell.type === 'door' && cell.isOpen) {
+        // offene Tür: begehbarer Durchgang, Türblatt zur Seite geschwenkt sichtbar
+        ctx.fillStyle = 'rgba(90,70,50,0.5)';
+        ctx.fillRect(px, py, CFG.tile, CFG.tile);
+        ctx.strokeStyle = 'rgba(255,210,120,0.35)';
+        ctx.strokeRect(px+1, py+1, CFG.tile-2, CFG.tile-2);
+        // aufgeschwenktes Türblatt an der Seite
+        ctx.fillStyle = cell.tier === 2 ? '#999' : '#6b4527';
+        ctx.fillRect(px+1, py+2, 4, CFG.tile-4);
+        // hp bar (Zombies können die Tür weiterhin angreifen, auch offen)
+        const openPct = cell.hp / cell.maxHp;
+        ctx.fillStyle = '#222';
+        ctx.fillRect(px+2, py-4, CFG.tile-4, 3);
+        ctx.fillStyle = openPct > 0.5 ? '#4c4' : (openPct > 0.25 ? '#cc4' : '#c44');
+        ctx.fillRect(px+2, py-4, (CFG.tile-4)*openPct, 3);
+      } else if (cell.type === 'wall' || cell.type === 'door') {
+        const pct = cell.hp / cell.maxHp;
+        ctx.fillStyle = cell.tier === 2 ? '#888' : (cell.type === 'door' ? '#6b4527' : '#8a5a2e');
+        ctx.fillRect(px+2, py+2, CFG.tile-4, CFG.tile-4);
+        // 3D-Kanten: helle Oberkante (Licht), dunkle Unterkante (Schatten)
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        ctx.fillRect(px+2, py+2, CFG.tile-4, 3);
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(px+2, py+CFG.tile-6, CFG.tile-4, 4);
+        // Material-Textur: Steinfugen bei Tier 2, Holzmaserung bei Tier 1
+        if (cell.type === 'wall') {
+          ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+          ctx.lineWidth = 1;
+          if (cell.tier === 2) {
+            ctx.beginPath();
+            ctx.moveTo(px+2, py+CFG.tile/2); ctx.lineTo(px+CFG.tile-2, py+CFG.tile/2);
+            ctx.moveTo(px+CFG.tile/2, py+2); ctx.lineTo(px+CFG.tile/2, py+CFG.tile/2);
+            ctx.moveTo(px+CFG.tile/3, py+CFG.tile/2); ctx.lineTo(px+CFG.tile/3, py+CFG.tile-2);
+            ctx.stroke();
+          } else {
+            ctx.beginPath();
+            ctx.moveTo(px+4, py+CFG.tile/3); ctx.lineTo(px+CFG.tile-4, py+CFG.tile/3);
+            ctx.moveTo(px+4, py+CFG.tile*2/3); ctx.lineTo(px+CFG.tile-4, py+CFG.tile*2/3);
+            ctx.stroke();
+          }
+        }
+
+        if (cell.type === 'door') {
+          // Plankenoptik: vertikale Linien + Griff
+          ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+          ctx.lineWidth = 1;
+          for (let lx = px+8; lx < px+CFG.tile-4; lx += 8) {
+            ctx.beginPath(); ctx.moveTo(lx, py+3); ctx.lineTo(lx, py+CFG.tile-3); ctx.stroke();
+          }
+          ctx.fillStyle = '#ddc48a';
+          ctx.beginPath();
+          ctx.arc(px + CFG.tile - 9, py + CFG.tile/2, 2, 0, Math.PI*2);
+          ctx.fill();
+        }
+
+        // Ruinen-Look: bröckelnde Speckles, verschwinden proportional zum Reparaturfortschritt
+        if (cell.isRuin && pct < 0.9) {
+          const seed = gx * 7919 + gy * 104729;
+          const rand = n => { const x = Math.sin(seed + n * 12.9898) * 43758.5453; return x - Math.floor(x); };
+          ctx.fillStyle = 'rgba(20,15,10,0.5)';
+          const speckleCount = Math.ceil((1 - pct) * 6);
+          for (let s = 0; s < speckleCount; s++) {
+            const sx = px + 4 + rand(s) * (CFG.tile - 8);
+            const sy = py + 4 + rand(s+50) * (CFG.tile - 8);
+            ctx.fillRect(sx, sy, 3, 3);
+          }
+          ctx.strokeStyle = 'rgba(255,180,100,0.35)';
+          ctx.strokeRect(px+1, py+1, CFG.tile-2, CFG.tile-2);
+        }
+
+        // hp bar
+        ctx.fillStyle = '#222';
+        ctx.fillRect(px+2, py-4, CFG.tile-4, 3);
+        ctx.fillStyle = pct > 0.5 ? '#4c4' : (pct > 0.25 ? '#cc4' : '#c44');
+        ctx.fillRect(px+2, py-4, (CFG.tile-4)*pct, 3);
+      }
+    });
+
+    // Waffen-Fundstück (nur solange nicht aufgehoben)
+    if (weaponPickup && !weaponPickup.collected) {
+      const glow = 0.5 + Math.sin(performance.now()/300) * 0.3;
+      ctx.fillStyle = `rgba(255,220,120,${glow*0.4})`;
+      ctx.beginPath();
+      ctx.arc(weaponPickup.x, weaponPickup.y, 16, 0, Math.PI*2);
+      ctx.fill();
+      ctx.font = '20px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('🔫', weaponPickup.x, weaponPickup.y + 7);
+      ctx.textAlign = 'left';
+    }
+
+    // Truhe: geschlossen -> leichtes Glimmen, öffnend -> Deckel klappt auf, offen -> leere Kiste
+    if (chest && !chest.opened) {
+      const cx2 = chest.x, cy2 = chest.y;
+      if (!chest.opening) {
+        const glow = 0.4 + Math.sin(performance.now()/400) * 0.25;
+        ctx.fillStyle = `rgba(255,200,80,${glow*0.35})`;
+        ctx.beginPath();
+        ctx.arc(cx2, cy2, 18, 0, Math.PI*2);
+        ctx.fill();
+      }
+      // Truhenkorpus
+      ctx.fillStyle = '#5a3d1f';
+      ctx.fillRect(cx2-14, cy2-6, 28, 16);
+      ctx.strokeStyle = '#2e1f10';
+      ctx.strokeRect(cx2-14, cy2-6, 28, 16);
+      // Deckel, klappt um die Hinterkante auf (Rotation von 0 -> ~100°)
+      const lidAngle = -chest.progress * 1.7;
+      ctx.save();
+      ctx.translate(cx2-14, cy2-6);
+      ctx.rotate(lidAngle);
+      ctx.fillStyle = '#7a5228';
+      ctx.fillRect(0, -8, 28, 8);
+      ctx.strokeStyle = '#2e1f10';
+      ctx.strokeRect(0, -8, 28, 8);
+      ctx.restore();
+      if (chest.opening && chest.progress < 1) {
+        ctx.fillStyle = '#222';
+        ctx.fillRect(cx2-14, cy2-16, 28, 3);
+        ctx.fillStyle = '#fc5';
+        ctx.fillRect(cx2-14, cy2-16, 28*chest.progress, 3);
+      }
+    } else if (chest && chest.opened) {
+      // leere, offene Truhe bleibt als Deko sichtbar
+      ctx.fillStyle = '#4a3016';
+      ctx.fillRect(chest.x-14, chest.y-6, 28, 16);
+      ctx.strokeStyle = '#2e1f10';
+      ctx.strokeRect(chest.x-14, chest.y-6, 28, 16);
+      ctx.fillStyle = '#3a2410';
+      ctx.fillRect(chest.x-11, chest.y-4, 22, 6);
+    }
+
+    // resource nodes: Bäume mit Stamm+Krone, Steine als unregelmäßige Felsbrocken
+    resourceNodes.forEach(node => {
+      if (node.amount <= 0) return;
+
+      // deterministische Variation pro Knoten (kein Flackern zwischen Frames)
+      if (node.seed === undefined) node.seed = Math.random() * 1000;
+      const nrand = n => { const x = Math.sin(node.seed + n * 12.9898) * 43758.5453; return x - Math.floor(x); };
+
+      // leichtes Zittern während des Sammelns
+      const shakeX = node.isGathering ? (Math.random()-0.5)*2.5 : 0;
+      const shakeY = node.isGathering ? (Math.random()-0.5)*2.5 : 0;
+      const nx = node.x + shakeX, ny = node.y + shakeY;
+
+      if (node.type === 'wood') {
+        // Baum: Stamm + gestufte Krone mit Farbvariation
+        const kroneBasis = 0.9 + nrand(1) * 0.25; // Größenvariation pro Baum
+        ctx.fillStyle = '#5a3d22';
+        ctx.fillRect(nx-2, ny+2, 5, 9);
+        const g1 = 40 + Math.floor(nrand(2)*25);
+        ctx.fillStyle = `rgb(${20+Math.floor(nrand(3)*15)},${70+g1},${25})`;
+        ctx.beginPath();
+        ctx.arc(nx, ny-2, 11*kroneBasis, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = `rgb(${30},${95+g1},${35})`;
+        ctx.beginPath();
+        ctx.arc(nx-3, ny-6, 7*kroneBasis, 0, Math.PI*2);
+        ctx.arc(nx+4, ny-4, 6*kroneBasis, 0, Math.PI*2);
+        ctx.fill();
+        // Licht-Highlight oben links
+        ctx.fillStyle = 'rgba(180,230,140,0.25)';
+        ctx.beginPath();
+        ctx.arc(nx-4, ny-8, 4*kroneBasis, 0, Math.PI*2);
+        ctx.fill();
+      } else {
+        // Fels: unregelmäßiges Polygon mit Schattierung und Rissen
+        const size = 9 + nrand(1) * 4;
+        ctx.fillStyle = '#6e6e68';
+        ctx.beginPath();
+        for (let a = 0; a < 7; a++) {
+          const ang = (a / 7) * Math.PI * 2;
+          const r = size * (0.75 + nrand(a+2) * 0.4);
+          const vx = nx + Math.cos(ang) * r;
+          const vy = ny + Math.sin(ang) * r * 0.8; // leicht abgeflacht
+          if (a === 0) ctx.moveTo(vx, vy); else ctx.lineTo(vx, vy);
+        }
+        ctx.closePath();
+        ctx.fill();
+        // Schattenseite unten rechts
+        ctx.fillStyle = 'rgba(30,30,28,0.35)';
+        ctx.beginPath();
+        ctx.arc(nx+3, ny+3, size*0.55, 0, Math.PI*2);
+        ctx.fill();
+        // Highlight oben links + Riss
+        ctx.fillStyle = 'rgba(200,200,190,0.3)';
+        ctx.fillRect(nx-4, ny-4, 3, 2);
+        ctx.strokeStyle = 'rgba(40,40,38,0.5)';
+        ctx.beginPath();
+        ctx.moveTo(nx - size*0.4, ny);
+        ctx.lineTo(nx + 1, ny + size*0.3);
+        ctx.stroke();
+      }
+
+      // supply bar
+      const pct = node.amount / node.maxAmount;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(node.x-11, node.y-20, 22, 3);
+      ctx.fillStyle = node.type === 'wood' ? '#8f5' : '#ccc';
+      ctx.fillRect(node.x-11, node.y-20, 22*pct, 3);
+
+      // rotierendes Werkzeug-Icon während des Sammelns
+      if (node.isGathering) {
+        ctx.save();
+        ctx.translate(nx, ny - 6);
+        ctx.rotate(Math.sin(performance.now()/80) * 0.9);
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(node.type === 'wood' ? '🪓' : '⛏️', 0, 0);
+        ctx.restore();
+        ctx.textAlign = 'left';
+      }
+    });
+
+    // zombies: Körper mit Wackelgang, hängenden Armen, glühenden Augen; weißes Aufblitzen bei Treffern
+    zombies.forEach(z => {
+      if (z.animSeed === undefined) z.animSeed = Math.random() * 10;
+      const t = performance.now()/1000 + z.animSeed;
+      const wobble = Math.sin(t * 7) * 2.5;         // seitliches Torkeln
+      const bob = Math.abs(Math.sin(t * 7)) * 1.5;  // Auf-und-ab beim Gehen
+      const zx = z.x, zy = z.y - bob;
+
+      const isBrecher = z.type === 'brecher';
+      const isSpucker = z.type === 'spucker';
+      const bodyColor = z.hitFlash > 0 ? '#fff' : (isBrecher ? '#5a2020' : (isSpucker ? '#4a7a2a' : '#3a6b32'));
+      const skinColor = z.hitFlash > 0 ? '#fff' : (isBrecher ? '#8a5a50' : (isSpucker ? '#9ac858' : '#7a9a68'));
+      const size = isBrecher ? 11 : 9;
+      if (z.hitFlash > 0) z.hitFlash -= 0.05;
+
+      ctx.save();
+      ctx.translate(zx, zy);
+      ctx.rotate(wobble * 0.03);
+
+      // hängende Arme (schwingen versetzt)
+      ctx.strokeStyle = skinColor;
+      ctx.lineWidth = 3;
+      const armSwing = Math.sin(t * 7) * 2;
+      ctx.beginPath();
+      ctx.moveTo(-size+2, -2);
+      ctx.lineTo(-size-2 + armSwing, size-2);
+      ctx.moveTo(size-2, -2);
+      ctx.lineTo(size+2 - armSwing, size-2);
+      ctx.stroke();
+
+      // Körper
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(-size, -size, size*2, size*2);
+
+      if (isSpucker) {
+        // aufgeblähter, pulsierender Giftbauch — unverwechselbare Silhouette
+        const bulge = 1 + Math.sin(t * 4) * 0.12;
+        ctx.fillStyle = z.hitFlash > 0 ? '#fff' : '#7ab838';
+        ctx.beginPath();
+        ctx.ellipse(0, 3, 8*bulge, 6*bulge, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(200,255,120,0.4)';
+        ctx.beginPath();
+        ctx.ellipse(-2, 1, 3*bulge, 2.5*bulge, 0, 0, Math.PI*2);
+        ctx.fill();
+      } else {
+        // zerfetzte Kleidung: dunkle Flecken
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        ctx.fillRect(-size+2, size-5, 4, 3);
+        ctx.fillRect(size-6, -size+3, 3, 4);
+      }
+
+      // Kopf
+      ctx.fillStyle = skinColor;
+      ctx.fillRect(-5, -size-6, 10, 8);
+      // glühende Augen
+      ctx.fillStyle = z.hitFlash > 0 ? '#f00' : (isBrecher ? '#ff5533' : (isSpucker ? '#aaff22' : '#ccff44'));
+      ctx.fillRect(-3, -size-4, 2, 2);
+      ctx.fillRect(2, -size-4, 2, 2);
+
+      ctx.restore();
+
+      // hp bar
+      const pct = z.hp / z.maxHp;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(z.x-10, z.y-size-14, 20, 3);
+      ctx.fillStyle = '#c44';
+      ctx.fillRect(z.x-10, z.y-size-14, 20*pct, 3);
+    });
+
+    // bullets: Kugeln gelb, Turmbolzen braun mit Spitze, Spucke als grüner Gift-Blob
+    bullets.forEach(b => {
+      const angle = Math.atan2(b.vy, b.vx);
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(angle);
+      if (b.hostile) {
+        const blob = 1 + Math.sin(performance.now()/60) * 0.2;
+        ctx.fillStyle = '#7ac828';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 5*blob, 4*blob, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(200,255,120,0.5)';
+        ctx.beginPath();
+        ctx.arc(-1, -1, 2, 0, Math.PI*2);
+        ctx.fill();
+      } else if (b.isBolt) {
+        ctx.fillStyle = '#7a5228';
+        ctx.fillRect(-7, -1, 12, 2);
+        ctx.fillStyle = '#c8c8c0';
+        ctx.beginPath();
+        ctx.moveTo(5, -3); ctx.lineTo(9, 0); ctx.lineTo(5, 3);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillStyle = '#ffe066';
+        ctx.fillRect(-6, -1.5, 12, 3);
+      }
+      ctx.restore();
+    });
+
+    // particles
+    particles.forEach(p => {
+      if (p.type === 'gatherText') {
+        ctx.font = '14px sans-serif';
+        ctx.globalAlpha = Math.max(0, p.life / 0.6);
+        ctx.fillText(p.text, p.x - 10, p.y - (0.6 - p.life) * 20);
+        ctx.globalAlpha = 1;
+      } else if (p.type === 'chip') {
+        ctx.globalAlpha = Math.max(0, p.life / 0.35);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x-2, p.y-2, 4, 4);
+        ctx.globalAlpha = 1;
+      } else if (p.type === 'muzzle') {
+        ctx.globalAlpha = Math.max(0, p.life / 0.1);
+        ctx.fillStyle = '#ffcc55';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 6, 0, Math.PI*2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      } else if (p.type === 'doorFx') {
+        const maxLife = p.maxLife || 0.3;
+        ctx.globalAlpha = Math.max(0, Math.min(1, p.life / maxLife));
+        ctx.strokeStyle = '#ffd88a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(0, (maxLife - p.life) * 60), 0, Math.PI*2);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 1;
+      } else if (p.type === 'repairSpark') {
+        ctx.globalAlpha = Math.max(0, p.life / 0.3);
+        ctx.fillStyle = '#8f5';
+        ctx.font = '11px sans-serif';
+        ctx.fillText('🔧', p.x - 6, p.y - (0.3 - p.life) * 15);
+        ctx.globalAlpha = 1;
+      } else if (p.type === 'acidSplat') {
+        ctx.globalAlpha = Math.max(0, p.life / (p.maxLife || 0.15));
+        ctx.fillStyle = '#8ad838';
+        for (let s = 0; s < 4; s++) {
+          const sa = (s / 4) * Math.PI * 2 + p.life * 10;
+          const sd = (1 - p.life / (p.maxLife || 0.15)) * 10;
+          ctx.beginPath();
+          ctx.arc(p.x + Math.cos(sa)*sd, p.y + Math.sin(sa)*sd, 2.5, 0, Math.PI*2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      } else if (p.type === 'dmgNum') {
+        const prog = 1 - (p.life / p.maxLife);
+        ctx.globalAlpha = Math.max(0, 1 - prog * prog);
+        ctx.font = 'bold 13px monospace';
+        ctx.fillStyle = '#ffdd44';
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        ctx.lineWidth = 3;
+        ctx.textAlign = 'center';
+        ctx.strokeText(p.text, p.x, p.y - prog * 22);
+        ctx.fillText(p.text, p.x, p.y - prog * 22);
+        ctx.textAlign = 'left';
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 1;
+      } else if (p.type === 'zombieDeath') {
+        // umkippender, verblassender Körper
+        const prog = 1 - (p.life / p.maxLife); // 0 -> 1
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(prog * Math.PI / 2); // kippt zur Seite
+        ctx.globalAlpha = Math.max(0, 1 - prog * 1.2);
+        const size2 = p.isBrecher ? 11 : 9;
+        ctx.fillStyle = p.isBrecher ? '#5a2020' : '#3a6b32';
+        ctx.fillRect(-size2, -size2, size2*2, size2*2);
+        ctx.fillStyle = p.isBrecher ? '#8a5a50' : '#7a9a68';
+        ctx.fillRect(-5, -size2-6, 10, 8);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.fillStyle = `rgba(255,255,255,${p.life*3})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 6, 0, Math.PI*2);
+        ctx.fill();
+      }
+    });
+
+    // fog of war: alles bisher Unerkundete bleibt schwarz, Erkundetes bleibt dauerhaft sichtbar
+    ctx.drawImage(fogCanvas, 0, 0);
+
+    // Nacht-Beleuchtung: Dunkel-Layer mit ausgestanzten Lichtkreisen (Spieler + Lagerfeuer).
+    // Verstärkt die Bedrohung der Nacht massiv gegenüber dem reinen Farbstich.
+    if (phase === 'night') {
+      if (!lightCanvas) {
+        lightCanvas = document.createElement('canvas');
+        lightCanvas.width = CFG.tile * CFG.gridSize;
+        lightCanvas.height = CFG.tile * CFG.gridSize;
+        lightCtx = lightCanvas.getContext('2d');
+      }
+      lightCtx.clearRect(0, 0, lightCanvas.width, lightCanvas.height);
+      lightCtx.fillStyle = 'rgba(4,6,18,0.62)';
+      lightCtx.fillRect(0, 0, lightCanvas.width, lightCanvas.height);
+      lightCtx.globalCompositeOperation = 'destination-out';
+
+      const flicker = 0.92 + Math.sin(performance.now()/90) * 0.05 + Math.random()*0.03;
+      // Spieler-Licht (Taschenlampe/Fackel-Gefühl)
+      const pGrad = lightCtx.createRadialGradient(player.x, player.y, 20, player.x, player.y, 130*flicker);
+      pGrad.addColorStop(0, 'rgba(0,0,0,1)');
+      pGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      lightCtx.fillStyle = pGrad;
+      lightCtx.beginPath();
+      lightCtx.arc(player.x, player.y, 130*flicker, 0, Math.PI*2);
+      lightCtx.fill();
+
+      // Lagerfeuer-Licht in der Basis
+      const fireX = Math.floor(CFG.gridSize/2) * CFG.tile + CFG.tile/2;
+      const fireY = Math.floor(CFG.gridSize/2) * CFG.tile + CFG.tile/2;
+      const fGrad = lightCtx.createRadialGradient(fireX, fireY, 15, fireX, fireY, 110*flicker);
+      fGrad.addColorStop(0, 'rgba(0,0,0,1)');
+      fGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      lightCtx.fillStyle = fGrad;
+      lightCtx.beginPath();
+      lightCtx.arc(fireX, fireY, 110*flicker, 0, Math.PI*2);
+      lightCtx.fill();
+
+      // Feuerfallen leuchten ebenfalls — strategische Beleuchtung der Verteidigungslinie
+      Object.entries(grid).forEach(([key, cell]) => {
+        if (cell.type !== 'firetrap') return;
+        const [fgx, fgy] = key.split(',').map(Number);
+        const flx = fgx * CFG.tile + CFG.tile/2;
+        const fly = fgy * CFG.tile + CFG.tile/2;
+        const r = 75 * flicker * (0.6 + (cell.fuel / CFG.firetrapFuel) * 0.4);
+        const tGrad = lightCtx.createRadialGradient(flx, fly, 8, flx, fly, r);
+        tGrad.addColorStop(0, 'rgba(0,0,0,1)');
+        tGrad.addColorStop(1, 'rgba(0,0,0,0)');
+        lightCtx.fillStyle = tGrad;
+        lightCtx.beginPath();
+        lightCtx.arc(flx, fly, r, 0, Math.PI*2);
+        lightCtx.fill();
+      });
+
+      lightCtx.globalCompositeOperation = 'source-over';
+      ctx.drawImage(lightCanvas, 0, 0);
+
+      // warmer Schein-Kern ums Feuer als Farbakzent oben drauf
+      ctx.fillStyle = `rgba(255,150,50,${0.06*flicker})`;
+      ctx.beginPath();
+      ctx.arc(fireX, fireY, 60*flicker, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // player: Figur mit Körper, Kopf, Schrittwippen; Waffe zeigt in Blickrichtung
+    {
+      const isMoving = joystickActive && (joystickVec.x !== 0 || joystickVec.y !== 0);
+      const walkT = performance.now()/1000;
+      const stepBob = isMoving ? Math.abs(Math.sin(walkT * 10)) * 2 : 0;
+      const px2 = player.x, py2 = player.y - stepBob;
+      const fx = player.facing.x, fy = player.facing.y;
+
+      // weicher Schatten am Boden
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.ellipse(player.x, player.y + 9, 9, 4, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // Beine (nur sichtbar beim Laufen als Schritt-Andeutung)
+      if (isMoving) {
+        ctx.fillStyle = '#2a5a8a';
+        const legSwing = Math.sin(walkT * 10) * 3;
+        ctx.fillRect(px2 - 5 + legSwing, py2 + 5, 4, 6);
+        ctx.fillRect(px2 + 1 - legSwing, py2 + 5, 4, 6);
+      }
+
+      // Körper (Jacke)
+      ctx.fillStyle = '#3fa9f5';
+      ctx.fillRect(px2 - 8, py2 - 6, 16, 13);
+      // Jacken-Schattierung
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.fillRect(px2 - 8, py2 + 3, 16, 4);
+
+      // Kopf mit Haaransatz
+      ctx.fillStyle = '#e8c090';
+      ctx.fillRect(px2 - 5, py2 - 15, 10, 10);
+      ctx.fillStyle = '#6a4a2a';
+      ctx.fillRect(px2 - 5, py2 - 15, 10, 3);
+      // Augen in Blickrichtung versetzt
+      ctx.fillStyle = '#222';
+      ctx.fillRect(px2 - 3 + fx*2, py2 - 11 + fy*1, 2, 2);
+      ctx.fillRect(px2 + 1 + fx*2, py2 - 11 + fy*1, 2, 2);
+
+      // Waffe in Blickrichtung (nur wenn ausgerüstet)
+      if (getEquippedWeapon()) {
+        ctx.save();
+        ctx.translate(px2, py2 - 2);
+        ctx.rotate(Math.atan2(fy, fx));
+        ctx.fillStyle = '#333';
+        ctx.fillRect(6, -2, 10, 4);
+        ctx.fillStyle = '#555';
+        ctx.fillRect(6, 1, 4, 4);
+        ctx.restore();
+      }
+    }
+    // attack range indicator when cooldown ready
+    if (player.attackCooldown <= 0) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, CFG.playerAttackRange, 0, Math.PI*2);
+      ctx.stroke();
+    }
+
+    // Aiming-Fadenkreuz für die Schusswaffe
+    if (aiming && getEquippedWeapon()) {
+      const reticleDist = 90;
+      const rx = player.x + aimVec.x * reticleDist;
+      const ry = player.y + aimVec.y * reticleDist;
+
+      ctx.strokeStyle = 'rgba(255,90,60,0.5)';
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(player.x, player.y);
+      ctx.lineTo(rx, ry);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.strokeStyle = player.reloading ? 'rgba(150,150,150,0.6)' : 'rgba(255,60,30,0.85)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(rx, ry, 11, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(rx-16, ry); ctx.lineTo(rx-6, ry); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(rx+6, ry); ctx.lineTo(rx+16, ry); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(rx, ry-16); ctx.lineTo(rx, ry-6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(rx, ry+6); ctx.lineTo(rx, ry+16); ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+
+    ctx.restore();
+
+    // Basis-unter-Angriff: pulsierender roter Pfeil am Bildschirmrand Richtung Basis,
+    // damit man beim Sammeln sofort weiß, wohin man rennen muss.
+    if (baseUnderAttackTimer > 0) {
+      const baseX = Math.floor(CFG.gridSize/2) * CFG.tile + CFG.tile/2;
+      const baseY = Math.floor(CFG.gridSize/2) * CFG.tile + CFG.tile/2;
+      const dx = baseX - player.x, dy = baseY - player.y;
+      const distToBase = Math.hypot(dx, dy);
+      if (distToBase > 120) { // nur zeigen, wenn Basis nicht ohnehin im Blick
+        const ang = Math.atan2(dy, dx);
+        const arrowDist = Math.min(canvas.width, canvas.height) * 0.32;
+        const ax = canvas.width/2 + Math.cos(ang) * arrowDist;
+        const ay = canvas.height/2 + Math.sin(ang) * arrowDist;
+        const pulse = 0.6 + Math.sin(performance.now()/120) * 0.4;
+        ctx.save();
+        ctx.translate(ax, ay);
+        ctx.rotate(ang);
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = '#f33';
+        ctx.beginPath();
+        ctx.moveTo(16, 0);
+        ctx.lineTo(-8, -11);
+        ctx.lineTo(-3, 0);
+        ctx.lineTo(-8, 11);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  let lastWoodShown = 0, lastStoneShown = 0, lastBaseHpShown = Infinity;
+  function pulseHudValue(el) {
+    el.classList.remove('pop');
+    void el.offsetWidth; // Reflow erzwingen, damit die Animation neu startet
+    el.classList.add('pop');
+    setTimeout(() => el.classList.remove('pop'), 160);
+  }
+
+  function updateHUD() {
+    const woodEl = document.getElementById('woodVal');
+    const stoneEl = document.getElementById('stoneVal');
+    const woodNow = Math.floor(wood), stoneNow = Math.floor(stone);
+    if (woodNow > lastWoodShown) pulseHudValue(woodEl);
+    if (stoneNow > lastStoneShown) pulseHudValue(stoneEl);
+    lastWoodShown = woodNow; lastStoneShown = stoneNow;
+    woodEl.textContent = woodNow;
+    stoneEl.textContent = stoneNow;
+
+    const baseHpNow = Math.max(0, Math.floor(baseHP));
+    if (baseHpNow < lastBaseHpShown) {
+      const statsEl = document.getElementById('stats');
+      statsEl.classList.remove('hurt');
+      void statsEl.offsetWidth;
+      statsEl.classList.add('hurt');
+    }
+    lastBaseHpShown = baseHpNow;
+    document.getElementById('baseHpText').textContent = baseHpNow;
+    document.getElementById('baseHpBar').style.width = Math.max(0, (baseHP/CFG.baseMaxHP*100)) + '%';
+
+    const ammoBox = document.getElementById('ammoBox');
+    const ammoVal = document.getElementById('ammoVal');
+    const weapon = getEquippedWeapon();
+    if (!weapon) {
+      ammoBox.classList.remove('reloading');
+      ammoVal.textContent = '🔒 keine Waffe';
+    } else if (player.reloading) {
+      ammoBox.classList.add('reloading');
+      ammoVal.textContent = 'Nachladen…';
+    } else {
+      ammoBox.classList.remove('reloading');
+      const switchHint = player.weapons.length > 1 ? ' ↻' : '';
+      ammoVal.textContent = `${weapon.icon} ${player.ammo}/${weapon.magazineSize}${switchHint}`;
+    }
+
+    const phaseBox = document.getElementById('phaseBox');
+    const phaseTitle = document.getElementById('phaseTitle');
+    const phaseSubtext = document.getElementById('phaseSubtext');
+    const phaseProgressBar = document.getElementById('phaseProgressBar');
+    const skyOverlay = document.getElementById('skyOverlay');
+    const remaining = Math.ceil(Math.max(0, phaseTimer));
+
+    if (phase === 'day') {
+      const total = CFG.dayDuration;
+      const progressPct = Math.max(0, (phaseTimer / total) * 100);
+      phaseProgressBar.classList.remove('night');
+      phaseProgressBar.style.width = progressPct + '%';
+
+      if (phaseTimer <= CFG.duskWarning) {
+        phaseBox.classList.remove('night');
+        phaseBox.classList.add('dusk');
+        phaseTitle.textContent = `🌇 Dämmerung`;
+        phaseSubtext.textContent = `⚠️ Nacht ${waveCount+1} in ${remaining}s!`;
+        if (!dayWarningShown) { dayWarningShown = true; log(`⚠️ Nacht ${waveCount+1} naht!`, 'error'); }
+        const t = 1 - (phaseTimer / CFG.duskWarning);
+        skyOverlay.style.background = `rgba(120,40,10,${0.28*t})`;
+      } else {
+        phaseBox.classList.remove('night','dusk');
+        phaseTitle.textContent = `☀️ Tag ${dayCount}`;
+        phaseSubtext.textContent = `${remaining}s bis Nacht`;
+        skyOverlay.style.background = 'rgba(0,0,0,0)';
+      }
+    } else {
+      dayWarningShown = false;
+      phaseBox.classList.remove('dusk');
+      phaseBox.classList.add('night');
+      phaseProgressBar.classList.add('night');
+      const pct = zombies.length > 0 ? Math.max(8, (zombies.length / Math.max(1,peakZombieCount)) * 100) : 100;
+      phaseProgressBar.style.width = pct + '%';
+      phaseTitle.textContent = `🌙 Nacht ${waveCount}`;
+      phaseSubtext.textContent = `Zombies übrig: ${zombies.length}`;
+      skyOverlay.style.background = 'rgba(10,10,40,0.35)';
+    }
+  }
+
+  // ---------- PRESTIGE-SHOP ----------
+  // Datengetrieben: neue Angebote = neuer Eintrag. 'once' = Freischaltung, sonst wiederholbar kaufbar.
+  const SHOP_ITEMS = [
+    { id: 'turret',   icon: '🏹', label: 'Pfeilturm',      cost: 80, once: true,
+      apply: s => { s.unlocks.turret = true; } },
+    { id: 'firetrap', icon: '🔥', label: 'Feuerfalle',     cost: 50, once: true,
+      apply: s => { s.unlocks.firetrap = true; } },
+    { id: 'wood',     icon: '🪵', label: '+15 Start-Holz', cost: 30,
+      apply: s => { s.bonusWood += 15; } },
+    { id: 'stone',    icon: '🪨', label: '+10 Start-Stein',cost: 30,
+      apply: s => { s.bonusStone += 10; } },
+    { id: 'basehp',   icon: '❤️', label: '+15 Basis-HP',   cost: 40,
+      apply: s => { s.bonusBaseHP += 15; } },
+  ];
+
+  function renderShop() {
+    const row = document.getElementById('shopRow');
+    document.getElementById('shopPointsVal').textContent = save.prestige;
+    row.innerHTML = '';
+    SHOP_ITEMS.forEach(item => {
+      const owned = item.once && save.unlocks[item.id];
+      const btn = document.createElement('button');
+      btn.className = owned ? 'owned' : '';
+      btn.disabled = !owned && save.prestige < item.cost;
+      btn.innerHTML = `<span class="shopIcon">${item.icon}</span>${item.label}<span class="shopCost">${owned ? '✓ freigeschaltet' : item.cost + ' P'}</span>`;
+      if (!owned) {
+        btn.addEventListener('click', () => {
+          if (save.prestige < item.cost) return;
+          save.prestige -= item.cost;
+          item.apply(save);
+          saveSave(save);
+          log(`${item.icon} ${item.label} gekauft!`, 'success');
+          renderShop(); // Anzeige aktualisieren, Mehrfachkauf möglich
+        });
+      }
+      row.appendChild(btn);
+    });
+  }
+
+  function endRun() {
+    gameRunning = false;
+    const prestigeGain = Math.floor(waveCount * 10 + zombiesKilled * 2);
+    save.prestige += prestigeGain;
+    saveSave(save);
+
+    document.getElementById('overlayStats').textContent =
+      `Überlebte Nächte: ${waveCount} — Getötete Zombies: ${zombiesKilled} — Tag erreicht: ${dayCount}`;
+    document.getElementById('prestigeGain').textContent = prestigeGain;
+    renderShop();
+    document.getElementById('overlay').classList.add('show');
+  }
+
+  document.getElementById('restartBtn').addEventListener('click', () => {
+    document.getElementById('overlay').classList.remove('show');
+    initGame();
+    gameRunning = true;
+  });
+  addPressFeedback(document.getElementById('restartBtn'));
+
+  document.getElementById('startBtn').addEventListener('click', () => {
+    document.getElementById('startOverlay').style.display = 'none';
+    initGame();
+    gameRunning = true;
+  });
+  addPressFeedback(document.getElementById('startBtn'));
+
+  function loop(now) {
+    let dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+    // Hit-Stop: kurze Mikropause nach kräftigem Treffer verstärkt das Wucht-Gefühl
+    if (hitStopTimer > 0) {
+      hitStopTimer -= dt;
+      dt *= 0.1;
+    }
+    if (gameRunning) {
+      try {
+        update(dt);
+        render();
+      } catch (err) {
+        // Einzelner Fehler soll nie den ganzen Frame/die Szene zerreißen —
+        // Canvas-Transform-Stack sicherheitshalber zurücksetzen und weiterlaufen lassen.
+        console.error('Frame-Fehler abgefangen:', err);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
